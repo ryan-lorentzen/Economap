@@ -13,6 +13,7 @@ import userLocationIcon from './user-location-marker';
 interface PriceMapProps {
   stores: Store[];
   onStoreClick: (id: string) => void;
+  onGasStationClick?: (id: string) => void;
   waypoints?: { lat: number; lng: number }[];
   gasStations?: GasStation[];
   locationErrorMessage?: string | null;
@@ -66,7 +67,7 @@ const formatUpdatedTime = (timestamp?: string) => {
   }).format(parsedDate);
 };
 
-export const PriceMap = ({ stores, onStoreClick, waypoints, gasStations, locationErrorMessage }: PriceMapProps) => {
+export const PriceMap = ({ stores, onStoreClick, onGasStationClick, waypoints, gasStations, locationErrorMessage }: PriceMapProps) => {
   const { latitude, longitude } = useLocationStore();
 
 
@@ -151,6 +152,11 @@ export const PriceMap = ({ stores, onStoreClick, waypoints, gasStations, locatio
             key={station.id} 
             position={[station.coordinates.lat, station.coordinates.lng]} 
             icon={gasStationIcon}
+            eventHandlers={{
+              click: () => {
+                onGasStationClick?.(station.id);
+              },
+            }}
           >
             <Popup>
               <div className="font-sans text-foreground">
@@ -162,6 +168,14 @@ export const PriceMap = ({ stores, onStoreClick, waypoints, gasStations, locatio
                 </p>
                 {station.priceUpdatedAt && (
                   <p>Updated: {formatUpdatedTime(station.priceUpdatedAt)}</p>
+                )}
+                {onGasStationClick && (
+                  <button
+                    onClick={() => onGasStationClick(station.id)}
+                    className="mt-3 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-[0_10px_24px_-12px_rgba(13,148,136,0.85)] ring-1 ring-emerald-200/70 transition-colors duration-200 hover:bg-emerald-700"
+                  >
+                    Select Station
+                  </button>
                 )}
                 {station.googleMapsUri && (
                   <a

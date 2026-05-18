@@ -1,18 +1,14 @@
 'use client';
 
 import { getLiveGasStations } from '@/GasPrices/client';
-import { getLiveGroceryStores } from '@/GroceryStores/client';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
-import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { buildTripPlan } from '@/features/map/components/routing-engine';
-import { getProductPricesForStores } from '@/lib/dataSource';
 import { getRouteMetrics, haversineDistance } from '@/lib/routingUtils';
-import { useCartStore } from '@/store/useCartStore';
 import { useLocationStore } from '@/store/useLocationStore';
-import { CartItem, GasStation, Product, RouteLegEstimate, Store, TripEstimateSummary } from '@/types';
+import { GasStation, RouteLegEstimate, TripEstimateSummary } from '@/types';
 
 const PriceMap = dynamic(() => import('@/features/map/components/PriceMap').then(mod => mod.PriceMap), { ssr: false });
 
@@ -33,18 +29,14 @@ const legendItems = [
     label: 'Gas station',
     icon: legendMarker('#dc2626', '#7f1d1d', '#fff1f1'),
   },
-  {
-    label: 'Grocery store',
-    icon: legendMarker('#2563eb', '#1d4ed8', '#eff6ff'),
-  },
 ];
 
-interface StoreWithCartBalance extends Store {
-  cartBalance: number | null;
+interface GasStationWithDistance extends GasStation {
   distanceMiles: number | null;
+  economapScore: number | null;
 }
 
-type StoreSortMode = 'best' | 'price' | 'distance';
+type GasSortMode = 'best' | 'price' | 'distance';
 
 const METERS_PER_MILE = 1_609.34;
 const MIN_SEARCH_RADIUS_MILES = 2;
@@ -52,20 +44,45 @@ const MAX_SEARCH_RADIUS_MILES = 15;
 const DEFAULT_SEARCH_RADIUS_MILES = 7;
 const SECONDS_PER_MINUTE = 60;
 const GAS_CACHE_LOCATION_PRECISION = 3;
+const DIRECT_DISTANCE_WEIGHT = 6;
 
 interface CachedGasStationsEntry {
   fetchedRadiusMeters: number;
   stations: GasStation[];
 }
 
-interface CachedStoresEntry {
-  fetchedRadiusMeters: number;
-  stores: Store[];
-}
-
 const formatMiles = (distanceMeters: number) => `${(distanceMeters / METERS_PER_MILE).toFixed(1)} mi`;
 const buildGasCacheKey = (latitude: number, longitude: number) =>
   `${latitude.toFixed(GAS_CACHE_LOCATION_PRECISION)}:${longitude.toFixed(GAS_CACHE_LOCATION_PRECISION)}`;
+
+const formatFuelType = (fuelType?: string) => {
+  if (!fuelType) {
+    return null;
+  }
+
+  return fuelType
+    .toLowerCase()
+    .split('_')
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
+};
+
+const formatUpdatedTime = (timestamp?: string) => {
+  if (!timestamp) {
+    return null;
+  }
+
+  const parsedDate = new Date(timestamp);
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(parsedDate);
+};
 
 const formatDuration = (durationSeconds: number) => {
   const roundedMinutes = Math.max(1, Math.round(durationSeconds / SECONDS_PER_MINUTE));
@@ -84,28 +101,21 @@ const formatDuration = (durationSeconds: number) => {
 };
 
 export default function Home() {
-  const { items: cartItems, getGas } = useCartStore();
   const { latitude, longitude, setLocation } = useLocationStore();
 
   const [locationErrorMessage, setLocationErrorMessage] = useState<string | null>(null);
-  const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+  const [hasSearchedGas, setHasSearchedGas] = useState(false);
+  const [selectedGasStationId, setSelectedGasStationId] = useState<string | null>(null);
   const [searchRadiusMiles, setSearchRadiusMiles] = useState(DEFAULT_SEARCH_RADIUS_MILES);
-  const [isBestStoresExpanded, setIsBestStoresExpanded] = useState(true);
-  const [storeSortMode, setStoreSortMode] = useState<StoreSortMode>('best');
+  const [isBestGasExpanded, setIsBestGasExpanded] = useState(true);
+  const [gasSortMode, setGasSortMode] = useState<GasSortMode>('best');
   const [tripEstimateSummary, setTripEstimateSummary] = useState<TripEstimateSummary | null>(null);
   const [isTripEstimateLoading, setIsTripEstimateLoading] = useState(false);
-  const [storesInRadius, setStoresInRadius] = useState<Store[]>([]);
-  const [storesErrorMessage, setStoresErrorMessage] = useState<string | null>(null);
-  const [isStoresLoading, setIsStoresLoading] = useState(false);
   const [gasStationsInRadius, setGasStationsInRadius] = useState<GasStation[]>([]);
   const [gasStationsErrorMessage, setGasStationsErrorMessage] = useState<string | null>(null);
   const [isGasStationsLoading, setIsGasStationsLoading] = useState(false);
-  const storesCacheRef = useRef<Map<string, CachedStoresEntry>>(new Map());
   const gasStationsCacheRef = useRef<Map<string, CachedGasStationsEntry>>(new Map());
-  const selectedProducts = useMemo<Product[]>(
-    () => cartItems.map((item) => item.product),
-    [cartItems]
-  );
+
   const searchRadiusMeters = useMemo(
     () => searchRadiusMiles * METERS_PER_MILE,
     [searchRadiusMiles]
@@ -114,129 +124,90 @@ export default function Home() {
     () => (latitude !== null && longitude !== null ? { lat: latitude, lng: longitude } : null),
     [latitude, longitude]
   );
-  const productPrices = useMemo(
-    () => (
-      selectedProducts.length > 0
-        ? getProductPricesForStores({
-            storeIds: storesInRadius.map((store) => store.id),
-            products: selectedProducts,
-          })
-        : {}
-    ),
-    [selectedProducts, storesInRadius]
-  );
 
-  const storesWithBalances: StoreWithCartBalance[] = useMemo(() => {
-    if (selectedProducts.length === 0) {
-      return storesInRadius.map((store) => ({
-        ...store,
-        cartBalance: null,
-        distanceMiles: userLocation
-          ? haversineDistance(
-              userLocation.lat,
-              userLocation.lng,
-              store.coordinates.lat,
-              store.coordinates.lng
-            ) / METERS_PER_MILE
-          : null,
-      }));
-    }
+  const gasStationsWithDistance: GasStationWithDistance[] = useMemo(() => {
+    return gasStationsInRadius.map((station) => {
+      const distanceMiles = userLocation
+        ? haversineDistance(
+            userLocation.lat,
+            userLocation.lng,
+            station.coordinates.lat,
+            station.coordinates.lng
+          ) / METERS_PER_MILE
+        : null;
 
-    return storesInRadius
-      .map(store => {
-        let totalBalance = 0;
-        let allProductsAvailable = true;
+      return {
+        ...station,
+        distanceMiles,
+        economapScore: distanceMiles === null
+          ? null
+          : distanceMiles * DIRECT_DISTANCE_WEIGHT + station.pricePerGallon,
+      };
+    });
+  }, [gasStationsInRadius, userLocation]);
 
-        cartItems.forEach((item: CartItem) => {
-          const price = productPrices[store.id]?.[item.product.id];
-          if (price !== undefined) {
-            totalBalance += price * item.quantity;
-          } else {
-            allProductsAvailable = false;
-          }
-        });
-
-        return {
-          ...store,
-          cartBalance: allProductsAvailable ? parseFloat(totalBalance.toFixed(2)) : null,
-          distanceMiles: userLocation
-            ? haversineDistance(
-                userLocation.lat,
-                userLocation.lng,
-                store.coordinates.lat,
-                store.coordinates.lng
-              ) / METERS_PER_MILE
-            : null,
-        };
-      })
-      .filter(store => store.cartBalance !== null);
-  }, [cartItems, productPrices, selectedProducts.length, storesInRadius, userLocation]);
-
-  const storesToDisplay = useMemo(() => {
-    const comparableStores = storesWithBalances.filter(
-      (store): store is StoreWithCartBalance & { cartBalance: number; distanceMiles: number } =>
-        store.cartBalance !== null && store.distanceMiles !== null
+  const gasStationsToDisplay = useMemo(() => {
+    const comparableStations = gasStationsWithDistance.filter(
+      (station): station is GasStationWithDistance & { distanceMiles: number; economapScore: number } =>
+        station.distanceMiles !== null && station.economapScore !== null
     );
 
-    if (comparableStores.length === 0) {
-      return storesWithBalances.filter(store => store.cartBalance !== null);
+    if (comparableStations.length === 0) {
+      return gasStationsWithDistance;
     }
 
-    if (storeSortMode === 'price') {
-      return [...comparableStores].sort((a, b) => a.cartBalance - b.cartBalance);
+    if (gasSortMode === 'price') {
+      return [...comparableStations].sort((a, b) => {
+        if (a.pricePerGallon !== b.pricePerGallon) {
+          return a.pricePerGallon - b.pricePerGallon;
+        }
+
+        return a.distanceMiles - b.distanceMiles;
+      });
     }
 
-    if (storeSortMode === 'distance') {
-      return [...comparableStores].sort((a, b) => a.distanceMiles - b.distanceMiles);
+    if (gasSortMode === 'distance') {
+      return [...comparableStations].sort((a, b) => {
+        if (a.distanceMiles !== b.distanceMiles) {
+          return a.distanceMiles - b.distanceMiles;
+        }
+
+        return a.pricePerGallon - b.pricePerGallon;
+      });
     }
 
-    const minPrice = Math.min(...comparableStores.map((store) => store.cartBalance));
-    const maxPrice = Math.max(...comparableStores.map((store) => store.cartBalance));
-    const minDistance = Math.min(...comparableStores.map((store) => store.distanceMiles));
-    const maxDistance = Math.max(...comparableStores.map((store) => store.distanceMiles));
-    const priceRange = Math.max(maxPrice - minPrice, 0.01);
-    const distanceRange = Math.max(maxDistance - minDistance, 0.01);
+    return [...comparableStations].sort((a, b) => {
+      if (a.economapScore !== b.economapScore) {
+        return a.economapScore - b.economapScore;
+      }
 
-    return [...comparableStores].sort((a, b) => {
-      const aPriceScore = (a.cartBalance - minPrice) / priceRange;
-      const bPriceScore = (b.cartBalance - minPrice) / priceRange;
-      const aDistanceScore = (a.distanceMiles - minDistance) / distanceRange;
-      const bDistanceScore = (b.distanceMiles - minDistance) / distanceRange;
-      const aCompositeScore = aPriceScore * 0.6 + aDistanceScore * 0.4;
-      const bCompositeScore = bPriceScore * 0.6 + bDistanceScore * 0.4;
-
-      return aCompositeScore - bCompositeScore;
+      return a.pricePerGallon - b.pricePerGallon;
     });
-  }, [storeSortMode, storesWithBalances]);
-  const activeSelectedStoreId = useMemo(
-    () => (selectedStoreId && storesToDisplay.some((store) => store.id === selectedStoreId) ? selectedStoreId : null),
-    [selectedStoreId, storesToDisplay]
+  }, [gasSortMode, gasStationsWithDistance]);
+
+  const activeSelectedGasStationId = useMemo(
+    () => (
+      selectedGasStationId && gasStationsToDisplay.some((station) => station.id === selectedGasStationId)
+        ? selectedGasStationId
+        : null
+    ),
+    [selectedGasStationId, gasStationsToDisplay]
   );
 
-  const mapStores = useMemo(() => {
-    return activeSelectedStoreId
-      ? storesToDisplay.filter(store => store.id === activeSelectedStoreId)
-      : storesToDisplay;
-  }, [activeSelectedStoreId, storesToDisplay]);
-
-  const filteredGasStations = useMemo(() => {
-    return getGas ? gasStationsInRadius : [];
-  }, [gasStationsInRadius, getGas]);
-
-  const selectedStore = useMemo(
-    () => storesToDisplay.find(store => store.id === activeSelectedStoreId) ?? null,
-    [activeSelectedStoreId, storesToDisplay]
+  const selectedGasStation = useMemo(
+    () => gasStationsToDisplay.find(station => station.id === activeSelectedGasStationId) ?? null,
+    [activeSelectedGasStationId, gasStationsToDisplay]
   );
 
   const tripPlan = useMemo(
     () => buildTripPlan({
       userLocation,
-      selectedStore,
-      gasStations: filteredGasStations,
-      hasSelectedGroceries: selectedProducts.length > 0,
-      shouldGetGas: getGas,
+      selectedStore: null,
+      gasStations: selectedGasStation ? [selectedGasStation] : [],
+      hasSelectedGroceries: false,
+      shouldGetGas: selectedGasStation !== null,
     }),
-    [filteredGasStations, getGas, selectedProducts.length, selectedStore, userLocation]
+    [selectedGasStation, userLocation]
   );
 
   const dynamicWaypoints = useMemo(
@@ -245,103 +216,13 @@ export default function Home() {
         return tripPlan.orderedStops.map(stop => stop.coordinates);
       }
 
-      if (userLocation && selectedStore) {
-        return [userLocation, selectedStore.coordinates];
-      }
-
       return [];
     },
-    [selectedStore, tripPlan, userLocation]
+    [tripPlan]
   );
 
-  const gasStationsToDisplay = useMemo(() => {
-    if (!getGas) {
-      return [];
-    }
-
-    return filteredGasStations;
-  }, [filteredGasStations, getGas]);
-
   useEffect(() => {
-    if (latitude === null || longitude === null) {
-      setStoresInRadius([]);
-      setStoresErrorMessage(null);
-      setIsStoresLoading(false);
-      return;
-    }
-
-    let isActive = true;
-    const abortController = new AbortController();
-    const storesCacheKey = buildGasCacheKey(latitude, longitude);
-    const cachedStores = storesCacheRef.current.get(storesCacheKey);
-
-    if (cachedStores) {
-      const locallyFilteredStores = cachedStores.stores.filter((store) => {
-        const distanceFromUserMeters = haversineDistance(
-          latitude,
-          longitude,
-          store.coordinates.lat,
-          store.coordinates.lng
-        );
-
-        return distanceFromUserMeters <= searchRadiusMeters;
-      });
-
-      setStoresInRadius(locallyFilteredStores);
-
-      if (cachedStores.fetchedRadiusMeters >= searchRadiusMeters) {
-        setStoresErrorMessage(null);
-        setIsStoresLoading(false);
-        return;
-      }
-    }
-
-    const loadStores = async () => {
-      setStoresErrorMessage(null);
-      setIsStoresLoading(true);
-
-      try {
-        const stores = await getLiveGroceryStores({
-          latitude,
-          longitude,
-          radiusMeters: searchRadiusMeters,
-          signal: abortController.signal,
-        });
-
-        if (!isActive) {
-          return;
-        }
-
-        storesCacheRef.current.set(storesCacheKey, {
-          fetchedRadiusMeters: searchRadiusMeters,
-          stores,
-        });
-        setStoresInRadius(stores);
-      } catch (error) {
-        if (!isActive || abortController.signal.aborted) {
-          return;
-        }
-
-        setStoresErrorMessage(
-          error instanceof Error ? error.message : 'Unable to load live grocery stores.'
-        );
-      } finally {
-        if (isActive) {
-          setIsStoresLoading(false);
-        }
-      }
-    };
-
-    void loadStores();
-
-    return () => {
-      isActive = false;
-      abortController.abort();
-    };
-  }, [latitude, longitude, searchRadiusMeters]);
-
-  useEffect(() => {
-    if (!getGas || latitude === null || longitude === null) {
+    if (!hasSearchedGas || latitude === null || longitude === null) {
       setGasStationsInRadius([]);
       setGasStationsErrorMessage(null);
       setIsGasStationsLoading(false);
@@ -416,7 +297,7 @@ export default function Home() {
       isActive = false;
       abortController.abort();
     };
-  }, [getGas, latitude, longitude, searchRadiusMeters]);
+  }, [hasSearchedGas, latitude, longitude, searchRadiusMeters]);
 
   useEffect(() => {
     if (!tripPlan || tripPlan.orderedStops.length < 2) {
@@ -498,7 +379,7 @@ export default function Home() {
       error => {
         const fallbackMessage =
           error.code === error.PERMISSION_DENIED
-            ? 'Location access was denied. Enable it in your browser to start the map from your current position.'
+            ? 'Location access was denied. Enable it in your browser to search nearby gas stations.'
             : 'We could not determine your location. Check your browser settings and try again.';
 
         setLocationErrorMessage(fallbackMessage);
@@ -506,8 +387,13 @@ export default function Home() {
     );
   }, [setLocation]);
 
-  const handleStoreClick = (id: string) => {
-    setSelectedStoreId(id);
+  const handleFindGasClick = () => {
+    setSelectedGasStationId(null);
+    setHasSearchedGas(true);
+  };
+
+  const handleGasStationClick = (id: string) => {
+    setSelectedGasStationId(id);
     const mapElement = document.getElementById('price-map');
 
     if (mapElement) {
@@ -520,17 +406,18 @@ export default function Home() {
       <div className="relative z-10 flex w-full flex-col items-center">
         <h1 className="mb-6 flex items-center justify-center gap-3 text-center text-3xl font-semibold tracking-tight text-primary md:mb-8 md:text-5xl">
           <Image src="/AppIcon.png" alt="Economap icon" width={48} height={48} className="h-11 w-11 rounded-xl md:h-12 md:w-12" />
-          <span>EconoMap Trip Planner</span>
+          <span>EconoMap Gas Finder</span>
         </h1>
 
         <div className="flex w-full max-w-6xl flex-col gap-6 md:flex-row md:gap-8">
           <div className="flex w-full flex-col items-center">
             <div id="price-map" className="mb-6 h-[420px] w-full overflow-hidden rounded-2xl border border-white/70 bg-white/80 shadow-[0_20px_60px_-20px_rgba(15,23,42,0.35)] backdrop-blur md:mb-8 md:h-[560px]">
               <PriceMap
-                stores={mapStores}
-                onStoreClick={handleStoreClick}
+                stores={[]}
+                onStoreClick={() => undefined}
+                onGasStationClick={handleGasStationClick}
                 waypoints={dynamicWaypoints}
-                gasStations={gasStationsToDisplay}
+                gasStations={hasSearchedGas ? gasStationsToDisplay : []}
                 locationErrorMessage={locationErrorMessage}
               />
             </div>
@@ -552,7 +439,7 @@ export default function Home() {
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <h2 className="text-base font-semibold text-slate-900 md:text-lg">Trip Estimates</h2>
-                      <p className="text-sm text-slate-500">Drive time and distance for each stop, plus the hidden return trip home.</p>
+                      <p className="text-sm text-slate-500">Drive time and distance to the selected station, plus the hidden return trip home.</p>
                     </div>
                     {isTripEstimateLoading && (
                       <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-600">
@@ -572,9 +459,7 @@ export default function Home() {
                               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                                 Stop {index + 1}
                               </p>
-                              <p className="text-sm font-medium text-slate-900">
-                                Drive to {destinationStop.type === 'gas' ? 'gas station' : 'grocery store'}
-                              </p>
+                              <p className="text-sm font-medium text-slate-900">Drive to gas station</p>
                               <p className="text-sm text-slate-500">{destinationStop.name}</p>
                               <p className="text-sm text-slate-500">{destinationStop.address}</p>
                             </div>
@@ -616,7 +501,7 @@ export default function Home() {
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <h2 className="text-base font-semibold text-slate-900 md:text-lg">Search Radius</h2>
-                    <p className="text-sm text-slate-500">Show grocery stores and gas stations within your selected distance.</p>
+                    <p className="text-sm text-slate-500">Show gas stations within your selected distance.</p>
                   </div>
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
                     {searchRadiusMiles} mi
@@ -636,54 +521,50 @@ export default function Home() {
                   <span>{MAX_SEARCH_RADIUS_MILES} miles</span>
                 </div>
                 <p className="mt-4 text-sm text-slate-600">
-                  {getGas
-                    ? `Showing ${storesInRadius.length} grocery stores and ${gasStationsInRadius.length} live gas stations within ${searchRadiusMiles} miles.`
-                    : `Showing ${storesInRadius.length} grocery stores within ${searchRadiusMiles} miles. Enable Get Gas on the products page to load live gas prices.`}
+                  {hasSearchedGas
+                    ? `Showing ${gasStationsInRadius.length} live gas stations within ${searchRadiusMiles} miles.`
+                    : 'Choose a radius, then find nearby gas stations with live prices.'}
                 </p>
-                {isStoresLoading && (
-                  <p className="mt-2 text-sm text-slate-500">Loading live grocery stores...</p>
-                )}
-                {storesErrorMessage && (
-                  <p className="mt-2 text-sm text-rose-600">{storesErrorMessage}</p>
-                )}
-                {getGas && isGasStationsLoading && (
+                {isGasStationsLoading && (
                   <p className="mt-2 text-sm text-slate-500">Loading live gas station prices...</p>
                 )}
-                {getGas && gasStationsErrorMessage && (
+                {gasStationsErrorMessage && (
                   <p className="mt-2 text-sm text-rose-600">{gasStationsErrorMessage}</p>
                 )}
               </div>
             </div>
 
-            {selectedProducts.length === 0 && !getGas && (
+            <button
+              type="button"
+              onClick={handleFindGasClick}
+              disabled={latitude === null || longitude === null || isGasStationsLoading}
+              className="mt-6 w-full max-w-sm rounded-full bg-secondary px-6 py-3 text-center text-sm font-semibold text-secondary-foreground shadow-[0_12px_30px_-12px_rgba(37,99,235,0.8)] ring-1 ring-blue-200/70 transition-transform duration-300 ease-in-out hover:scale-[1.02] hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60 md:text-base"
+            >
+              {isGasStationsLoading ? 'Finding Gas...' : 'Find Gas'}
+            </button>
+
+            {!hasSearchedGas && (
               <div className="mt-4 w-full max-w-md rounded-2xl border border-white/70 bg-white/90 p-5 shadow-lg backdrop-blur animate-fade-in">
-                <p className="text-center text-base text-slate-700 md:text-lg">Add products to your cart to plan a trip.</p>
+                <p className="text-center text-base text-slate-700 md:text-lg">Use your current location to find gas stations nearby.</p>
               </div>
             )}
 
-            <Link
-              href="/products"
-              className="mt-6 w-full max-w-sm rounded-full bg-secondary px-6 py-3 text-center text-sm font-semibold text-secondary-foreground shadow-[0_12px_30px_-12px_rgba(37,99,235,0.8)] ring-1 ring-blue-200/70 transition-transform duration-300 ease-in-out hover:scale-[1.02] hover:opacity-95 md:text-base"
-            >
-              Select Products
-            </Link>
-
-            {selectedProducts.length > 0 && storesToDisplay.length > 0 && (
+            {hasSearchedGas && gasStationsToDisplay.length > 0 && (
               <div className="mt-6 w-full max-w-md rounded-2xl border border-white/70 bg-white/90 p-5 shadow-lg backdrop-blur animate-fade-in">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <h2 className="text-xl font-semibold text-slate-900 md:text-2xl">Best Stores</h2>
+                    <h2 className="text-xl font-semibold text-slate-900 md:text-2xl">Best Gas Stations</h2>
                     <p className="text-sm text-slate-500">
-                      {storesToDisplay.length} store{storesToDisplay.length === 1 ? '' : 's'} in your current search radius.
+                      {gasStationsToDisplay.length} station{gasStationsToDisplay.length === 1 ? '' : 's'} in your current search radius.
                     </p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setIsBestStoresExpanded((currentValue) => !currentValue)}
+                    onClick={() => setIsBestGasExpanded((currentValue) => !currentValue)}
                     className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-800 ring-1 ring-slate-300 transition-colors duration-200 hover:bg-slate-300"
-                    aria-expanded={isBestStoresExpanded}
+                    aria-expanded={isBestGasExpanded}
                   >
-                    {isBestStoresExpanded ? 'Collapse' : 'Expand'}
+                    {isBestGasExpanded ? 'Collapse' : 'Expand'}
                   </button>
                 </div>
 
@@ -696,38 +577,47 @@ export default function Home() {
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setStoreSortMode(option.value)}
+                      onClick={() => setGasSortMode(option.value)}
                       className={`rounded-full px-4 py-2 text-sm font-semibold ring-1 transition-colors duration-200 ${
-                        storeSortMode === option.value
+                        gasSortMode === option.value
                           ? 'bg-primary text-primary-foreground ring-emerald-200/70 shadow-[0_10px_24px_-12px_rgba(13,148,136,0.8)]'
                           : 'bg-slate-100 text-slate-700 ring-slate-200 hover:bg-slate-200'
                       }`}
-                      aria-pressed={storeSortMode === option.value}
+                      aria-pressed={gasSortMode === option.value}
                     >
                       {option.label}
                     </button>
                   ))}
                 </div>
 
-                {isBestStoresExpanded && (
+                {isBestGasExpanded && (
                   <ul className="mt-4 space-y-3">
-                    {storesToDisplay.map(store => (
-                      <li key={store.id} className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                    {gasStationsToDisplay.map(station => (
+                      <li key={station.id} className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
-                          <h3 className="truncate text-base font-medium text-slate-900 md:text-lg">{store.name}</h3>
-                          <p className="truncate text-sm text-slate-500">{store.address}</p>
-                          {store.distanceMiles !== null && (
-                            <p className="text-sm text-slate-500">{store.distanceMiles.toFixed(1)} miles away</p>
-                          )}
+                          <h3 className="truncate text-base font-medium text-slate-900 md:text-lg">{station.name}</h3>
+                          <p className="truncate text-sm text-slate-500">{station.address}</p>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-slate-500">
+                            {station.distanceMiles !== null && (
+                              <span>{station.distanceMiles.toFixed(1)} miles away</span>
+                            )}
+                            {station.fuelType && (
+                              <span>{formatFuelType(station.fuelType)}</span>
+                            )}
+                            {station.priceUpdatedAt && (
+                              <span>Updated {formatUpdatedTime(station.priceUpdatedAt)}</span>
+                            )}
+                          </div>
                         </div>
 
                         <div className="flex items-center justify-between gap-3 sm:justify-end">
-                          <span className="text-lg font-bold text-primary">${store.cartBalance?.toFixed(2)}</span>
+                          <span className="text-lg font-bold text-primary">${station.pricePerGallon.toFixed(2)}/gal</span>
                           <button
-                            onClick={() => handleStoreClick(store.id)}
-                            className={`rounded-full px-4 py-2 text-sm font-semibold ring-1 ring-black/10 transition-all duration-300 ease-in-out ${activeSelectedStoreId === store.id ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-12px_rgba(13,148,136,0.8)]' : 'bg-slate-200 text-slate-800 shadow-[0_10px_24px_-16px_rgba(15,23,42,0.35)] hover:bg-slate-300'}`}
+                            type="button"
+                            onClick={() => handleGasStationClick(station.id)}
+                            className={`rounded-full px-4 py-2 text-sm font-semibold ring-1 ring-black/10 transition-all duration-300 ease-in-out ${activeSelectedGasStationId === station.id ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-12px_rgba(13,148,136,0.8)]' : 'bg-slate-200 text-slate-800 shadow-[0_10px_24px_-16px_rgba(15,23,42,0.35)] hover:bg-slate-300'}`}
                           >
-                            {activeSelectedStoreId === store.id ? 'Selected' : 'Select'}
+                            {activeSelectedGasStationId === station.id ? 'Selected' : 'Select'}
                           </button>
                         </div>
                       </li>
@@ -737,22 +627,9 @@ export default function Home() {
               </div>
             )}
 
-            {selectedProducts.length > 0 && storesToDisplay.length === 0 && (
+            {hasSearchedGas && !isGasStationsLoading && gasStationsToDisplay.length === 0 && !gasStationsErrorMessage && (
               <div className="mt-6 w-full max-w-md rounded-2xl border border-white/70 bg-white/90 p-5 shadow-lg backdrop-blur animate-fade-in">
-                <p className="text-center text-base text-slate-700 md:text-lg">No stores found with all selected products.</p>
-              </div>
-            )}
-
-            {selectedProducts.length > 0 && (
-              <div className="mt-6 w-full max-w-md rounded-2xl border border-white/70 bg-white/90 p-5 shadow-lg backdrop-blur animate-fade-in">
-                <h2 className="mb-4 text-xl font-semibold text-slate-900 md:text-2xl">Selected Products</h2>
-                <ul className="list-disc space-y-2 pl-5">
-                  {cartItems.map(item => (
-                    <li key={item.product.id} className="text-base text-slate-700 md:text-lg">
-                      <span className="font-medium text-slate-900">{item.product.name}</span> from {item.product.brand} x{item.quantity}
-                    </li>
-                  ))}
-                </ul>
+                <p className="text-center text-base text-slate-700 md:text-lg">No gas stations with live prices were found in this radius.</p>
               </div>
             )}
           </div>

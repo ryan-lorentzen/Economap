@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "EconoMap",
-  description: "Plan grocery and gas station trips with optimized routing.",
+  description: "Find nearby gas stations with live prices and optimized routing.",
 };
 
 export default function RootLayout({
