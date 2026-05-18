@@ -42,6 +42,7 @@
 
   --font-sans: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   --font-mono: "Consolas", "SFMono-Regular", "Liberation Mono", monospace;
+  --font-display: "Avenir Next", "Segoe UI Variable Display", "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
 }
 
 .dark {
@@ -105,9 +106,42 @@
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
 }
 
+.leaflet-popup-content-wrapper {
+  padding-right: 0.25rem;
+}
+
+.leaflet-container a.leaflet-popup-close-button {
+  top: 8px;
+  right: 8px;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(15, 23, 42, 0.28);
+  color: rgb(15, 23, 42);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 36px;
+  text-align: center;
+  box-shadow: 0 10px 22px -18px rgba(15, 23, 42, 0.45);
+  touch-action: manipulation;
+}
+
+.leaflet-container a.leaflet-popup-close-button:hover {
+  background: #ef4444;
+  border-color: #dc2626;
+  color: white;
+}
+
+.leaflet-routing-collapse-btn:hover {
+  background: #ef4444;
+  border-color: #dc2626;
+  color: white;
+}
+
 .leaflet-control-container .leaflet-routing-container-hide {
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
 }
 
 .leaflet-control-container .leaflet-routing-container-hide .leaflet-routing-alt,
@@ -117,11 +151,22 @@
 
 .leaflet-routing-collapse-btn {
   position: absolute;
-  top: 0;
-  right: 6px;
-  font-size: 24px;
-  color: hsl(var(--primary));
-  font-weight: bold;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(15, 23, 42, 0.28);
+  color: rgb(15, 23, 42);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 10px 22px -18px rgba(15, 23, 42, 0.45);
+  touch-action: manipulation;
 }
 
 .leaflet-routing-collapse-btn:after {
@@ -135,9 +180,10 @@
   display: block;
   width: 26px;
   height: 23px;
-  border-radius: 9999px;
-  background: hsl(var(--primary));
-  box-shadow: 0 12px 24px -12px rgba(15, 23, 42, 0.65);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid hsl(var(--primary) / 0.45);
+  box-shadow: 0 12px 24px -16px rgba(15, 23, 42, 0.4);
 }
 
 .leaflet-routing-container-hide .leaflet-routing-collapse-btn:after {
@@ -145,7 +191,7 @@
   position: relative;
   top: -3px;
   left: 1px;
-  color: hsl(var(--primary-foreground));
+  color: hsl(var(--primary));
   font-size: 16px;
 }
 
@@ -158,4 +204,103 @@
 
 .red-marker-icon {
   filter: hue-rotate(240deg) saturate(200%) brightness(70%); /* Adjust to get a red shade */
+}
+
+.gas-price-marker {
+  background: transparent;
+  border: none;
+}
+
+.gas-price-marker .gas-price-marker__wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transform: translateY(-2px);
+  pointer-events: none;
+}
+
+.gas-price-marker .gas-price-marker__price {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-width: 52px;
+  padding: 4px 8px;
+  border-radius: 9999px;
+  background: rgba(15, 23, 42, 0.94);
+  color: hsl(var(--primary-foreground));
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 10px 24px -16px rgba(15, 23, 42, 0.85);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.gas-price-marker .gas-price-marker__count {
+  position: absolute;
+  top: -7px;
+  right: -14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9999px;
+  background: #ef4444;
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 18px -12px rgba(15, 23, 42, 0.8);
+  font-size: 0.65rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.gas-price-marker .gas-price-marker__pin {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #ef4444;
+  border: 2px solid white;
+  box-shadow: 0 8px 16px -10px rgba(15, 23, 42, 0.9);
+}
+
+.leaflet-routing-collapse-btn:after {
+  content: '\00d7';
+}
+
+.leaflet-routing-container-hide .leaflet-routing-collapse-btn {
+  left: 3px;
+  top: 3px;
+  background: hsl(var(--primary));
+  box-shadow: 0 12px 24px -12px rgba(15, 23, 42, 0.65);
+}
+
+.leaflet-routing-container-hide .leaflet-routing-collapse-btn:after {
+  content: '+';
+  color: hsl(var(--primary-foreground));
+  font-size: 20px;
+}
+
+.brand-title {
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+  text-shadow: 0 4px 14px rgba(13, 148, 136, 0.14);
+}
+
+@media (max-width: 768px) {
+  .leaflet-container a.leaflet-popup-close-button,
+  .leaflet-routing-collapse-btn {
+    width: 42px;
+    height: 42px;
+    font-size: 28px;
+    line-height: 40px;
+  }
+
+  .leaflet-control-container .leaflet-routing-container-hide {
+    width: 48px;
+    height: 48px;
+  }
 }

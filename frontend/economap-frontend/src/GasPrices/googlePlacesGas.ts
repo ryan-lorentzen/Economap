@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { LiveGasStationSearchParams } from '@/GasPrices/types';
-import { GasStation } from '@/types';
+import { FuelGrade, FuelPriceOption, GasStation } from '@/types';
 
 const GOOGLE_PLACES_NEARBY_URL = 'https://places.googleapis.com/v1/places:searchNearby';
 const GOOGLE_PLACES_FIELD_MASK = [
@@ -38,6 +38,13 @@ const FUEL_TYPE_PRIORITY = [
   'BIO_DIESEL',
   'LPG',
 ] as const;
+
+const FUEL_GRADE_TYPE_MAP: Record<FuelGrade, readonly string[]> = {
+  regular: ['REGULAR_UNLEADED', 'UNLEADED', 'SP87', 'SP88', 'UNLEADED_88', 'E10'],
+  midgrade: ['MIDGRADE', 'PLUS', 'SPECIAL_UNLEADED', 'SP89', 'SP90'],
+  premium: ['PREMIUM', 'SUPER_UNLEADED', 'SP91', 'SP91_E10', 'SP92', 'SP93', 'SP95', 'SP95_E10', 'SP98', 'SP99', 'SP100'],
+  diesel: ['DIESEL', 'DIESEL_PLUS', 'TRUCK_DIESEL', 'BIO_DIESEL'],
+};
 
 interface GooglePlacesNearbyResponse {
   places?: GooglePlace[];
@@ -111,11 +118,54 @@ const chooseFuelPrice = (fuelPrices: GoogleFuelPrice[]) => {
     })[0] ?? null;
 };
 
+const getFuelPriceForGrade = (
+  fuelPrices: GoogleFuelPrice[],
+  fuelGrade: FuelGrade
+): FuelPriceOption | null => {
+  const validPrices = fuelPrices.filter((fuelPrice) => {
+    const amount = parseMoney(fuelPrice.price);
+    return amount !== null && amount > 0;
+  });
+
+  for (const mappedType of FUEL_GRADE_TYPE_MAP[fuelGrade]) {
+    const match = validPrices.find((fuelPrice) => fuelPrice.type === mappedType);
+
+    if (match) {
+      return {
+        fuelType: match.type ?? mappedType,
+        pricePerGallon: Number((parseMoney(match.price) ?? 0).toFixed(3)),
+        priceUpdatedAt: match.updateTime,
+      };
+    }
+  }
+
+  return null;
+};
+
+const buildFuelPriceMap = (fuelPrices: GoogleFuelPrice[]) => {
+  const mappedFuelPrices = Object.entries(FUEL_GRADE_TYPE_MAP).reduce(
+    (accumulator, [fuelGrade]) => {
+      const fuelPrice = getFuelPriceForGrade(fuelPrices, fuelGrade as FuelGrade);
+
+      if (fuelPrice) {
+        accumulator[fuelGrade as FuelGrade] = fuelPrice;
+      }
+
+      return accumulator;
+    },
+    {} as Partial<Record<FuelGrade, FuelPriceOption>>
+  );
+
+  return mappedFuelPrices;
+};
+
 const mapPlaceToGasStation = (place: GooglePlace): GasStation | null => {
   const latitude = place.location?.latitude;
   const longitude = place.location?.longitude;
-  const selectedFuelPrice = chooseFuelPrice(place.fuelOptions?.fuelPrices ?? []);
+  const allFuelPrices = place.fuelOptions?.fuelPrices ?? [];
+  const selectedFuelPrice = chooseFuelPrice(allFuelPrices);
   const pricePerGallon = parseMoney(selectedFuelPrice?.price);
+  const fuelPrices = buildFuelPriceMap(allFuelPrices);
 
   if (
     !place.id ||
@@ -137,6 +187,7 @@ const mapPlaceToGasStation = (place: GooglePlace): GasStation | null => {
       lng: longitude,
     },
     fuelType: selectedFuelPrice?.type,
+    fuelPrices,
     googleMapsUri: place.googleMapsUri,
     pricePerGallon: Number(pricePerGallon.toFixed(3)),
     priceUpdatedAt: selectedFuelPrice?.updateTime,

@@ -23,6 +23,14 @@ export interface Store {
   source?: 'google_places';
 }
 
+export type FuelGrade = 'regular' | 'midgrade' | 'premium' | 'diesel';
+
+export interface FuelPriceOption {
+  fuelType: string;
+  pricePerGallon: number;
+  priceUpdatedAt?: string;
+}
+
 export interface GasStation {
   id: string;
   name: string;
@@ -32,6 +40,7 @@ export interface GasStation {
     lng: number;
   };
   fuelType?: string;
+  fuelPrices?: Partial<Record<FuelGrade, FuelPriceOption>>;
   googleMapsUri?: string;
   pricePerGallon: number;
   priceUpdatedAt?: string;

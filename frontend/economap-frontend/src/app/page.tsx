@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildTripPlan } from '@/features/map/components/routing-engine';
 import { getRouteMetrics, haversineDistance } from '@/lib/routingUtils';
 import { useLocationStore } from '@/store/useLocationStore';
-import { GasStation, RouteLegEstimate, TripEstimateSummary } from '@/types';
+import { FuelGrade, FuelPriceOption, GasStation, RouteLegEstimate, TripEstimateSummary } from '@/types';
 
 const PriceMap = dynamic(() => import('@/features/map/components/PriceMap').then(mod => mod.PriceMap), { ssr: false });
 
@@ -20,6 +20,15 @@ const legendMarker = (fill: string, stroke: string, innerFill: string) =>
     </svg>
   `)}`;
 
+const gasPriceLegendMarker = (priceLabel: string) =>
+  `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="74" height="56" viewBox="0 0 74 56">
+      <rect x="7" y="4" width="60" height="24" rx="12" fill="#0f172a" stroke="rgba(255,255,255,0.88)" stroke-width="1.2"/>
+      <text x="37" y="20" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="11" font-weight="700" fill="#ffffff">${priceLabel}</text>
+      <circle cx="37" cy="40" r="7" fill="#ef4444" stroke="#ffffff" stroke-width="2"/>
+    </svg>
+  `)}`;
+
 const legendItems = [
   {
     label: 'Your location',
@@ -27,7 +36,7 @@ const legendItems = [
   },
   {
     label: 'Gas station',
-    icon: legendMarker('#dc2626', '#7f1d1d', '#fff1f1'),
+    icon: gasPriceLegendMarker('$4.48'),
   },
 ];
 
@@ -38,13 +47,20 @@ interface GasStationWithDistance extends GasStation {
 
 type GasSortMode = 'best' | 'price' | 'distance';
 
+const FUEL_GRADE_OPTIONS: { value: FuelGrade; label: string }[] = [
+  { value: 'regular', label: 'Regular' },
+  { value: 'midgrade', label: 'Midgrade' },
+  { value: 'premium', label: 'Premium' },
+  { value: 'diesel', label: 'Diesel' },
+];
+
 const METERS_PER_MILE = 1_609.34;
 const MIN_SEARCH_RADIUS_MILES = 2;
 const MAX_SEARCH_RADIUS_MILES = 15;
 const DEFAULT_SEARCH_RADIUS_MILES = 7;
 const SECONDS_PER_MINUTE = 60;
 const GAS_CACHE_LOCATION_PRECISION = 3;
-const DIRECT_DISTANCE_WEIGHT = 6;
+const DIRECT_DISTANCE_WEIGHT = 0.1;
 
 interface CachedGasStationsEntry {
   fetchedRadiusMeters: number;
@@ -54,6 +70,9 @@ interface CachedGasStationsEntry {
 const formatMiles = (distanceMeters: number) => `${(distanceMeters / METERS_PER_MILE).toFixed(1)} mi`;
 const buildGasCacheKey = (latitude: number, longitude: number) =>
   `${latitude.toFixed(GAS_CACHE_LOCATION_PRECISION)}:${longitude.toFixed(GAS_CACHE_LOCATION_PRECISION)}`;
+
+const formatFuelGradeLabel = (fuelGrade: FuelGrade) =>
+  FUEL_GRADE_OPTIONS.find((option) => option.value === fuelGrade)?.label ?? fuelGrade;
 
 const formatFuelType = (fuelType?: string) => {
   if (!fuelType) {
@@ -106,6 +125,7 @@ export default function Home() {
   const [locationErrorMessage, setLocationErrorMessage] = useState<string | null>(null);
   const [hasSearchedGas, setHasSearchedGas] = useState(false);
   const [selectedGasStationId, setSelectedGasStationId] = useState<string | null>(null);
+  const [selectedFuelGrade, setSelectedFuelGrade] = useState<FuelGrade>('regular');
   const [searchRadiusMiles, setSearchRadiusMiles] = useState(DEFAULT_SEARCH_RADIUS_MILES);
   const [isBestGasExpanded, setIsBestGasExpanded] = useState(true);
   const [gasSortMode, setGasSortMode] = useState<GasSortMode>('best');
@@ -125,8 +145,35 @@ export default function Home() {
     [latitude, longitude]
   );
 
+  const gasStationsForSelectedFuel = useMemo(() => {
+    return gasStationsInRadius.flatMap((station) => {
+      const selectedFuelPrice: FuelPriceOption | null =
+        station.fuelPrices?.[selectedFuelGrade]
+        ?? (
+          selectedFuelGrade === 'regular'
+            ? {
+                fuelType: station.fuelType ?? 'REGULAR_UNLEADED',
+                pricePerGallon: station.pricePerGallon,
+                priceUpdatedAt: station.priceUpdatedAt,
+              }
+            : null
+        );
+
+      if (!selectedFuelPrice) {
+        return [];
+      }
+
+      return [{
+        ...station,
+        fuelType: selectedFuelPrice.fuelType,
+        pricePerGallon: selectedFuelPrice.pricePerGallon,
+        priceUpdatedAt: selectedFuelPrice.priceUpdatedAt,
+      }];
+    });
+  }, [gasStationsInRadius, selectedFuelGrade]);
+
   const gasStationsWithDistance: GasStationWithDistance[] = useMemo(() => {
-    return gasStationsInRadius.map((station) => {
+    return gasStationsForSelectedFuel.map((station) => {
       const distanceMiles = userLocation
         ? haversineDistance(
             userLocation.lat,
@@ -144,7 +191,7 @@ export default function Home() {
           : distanceMiles * DIRECT_DISTANCE_WEIGHT + station.pricePerGallon,
       };
     });
-  }, [gasStationsInRadius, userLocation]);
+  }, [gasStationsForSelectedFuel, userLocation]);
 
   const gasStationsToDisplay = useMemo(() => {
     const comparableStations = gasStationsWithDistance.filter(
@@ -392,7 +439,11 @@ export default function Home() {
     setHasSearchedGas(true);
   };
 
-  const handleGasStationClick = (id: string) => {
+  const handleGasStationMapClick = (id: string) => {
+    setSelectedGasStationId(id);
+  };
+
+  const handleGasStationListClick = (id: string) => {
     setSelectedGasStationId(id);
     const mapElement = document.getElementById('price-map');
 
@@ -406,7 +457,7 @@ export default function Home() {
       <div className="relative z-10 flex w-full flex-col items-center">
         <h1 className="mb-6 flex items-center justify-center gap-3 text-center text-3xl font-semibold tracking-tight text-primary md:mb-8 md:text-5xl">
           <Image src="/AppIcon.png" alt="Economap icon" width={48} height={48} className="h-11 w-11 rounded-xl md:h-12 md:w-12" />
-          <span>EconoMap Gas Finder</span>
+          <span className="brand-title">EconoMap Gas Finder</span>
         </h1>
 
         <div className="flex w-full max-w-6xl flex-col gap-6 md:flex-row md:gap-8">
@@ -415,23 +466,68 @@ export default function Home() {
               <PriceMap
                 stores={[]}
                 onStoreClick={() => undefined}
-                onGasStationClick={handleGasStationClick}
+                onGasStationClick={handleGasStationMapClick}
+                selectedGasStationId={activeSelectedGasStationId}
                 waypoints={dynamicWaypoints}
                 gasStations={hasSearchedGas ? gasStationsToDisplay : []}
                 locationErrorMessage={locationErrorMessage}
               />
             </div>
 
+            <div className="-mt-10 mb-6 w-full px-2 md:-mt-12">
+              <div className="relative z-20 w-full rounded-[0_0_1.5rem_1.5rem] border border-white/80 bg-white/95 px-4 py-4 shadow-[0_18px_36px_-24px_rgba(15,23,42,0.55)] backdrop-blur md:px-5">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Fuel Grade</h2>
+                    <p className="mt-1 text-sm text-slate-600">Switch prices and recommendations without reloading the area search.</p>
+                  </div>
+                  <div className="grid w-full grid-cols-2 gap-2 md:w-auto md:grid-cols-4">
+                    {FUEL_GRADE_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setSelectedFuelGrade(option.value)}
+                        className={`rounded-full px-4 py-2.5 text-sm font-semibold ring-1 transition-colors duration-200 ${
+                          selectedFuelGrade === option.value
+                            ? 'bg-primary text-primary-foreground ring-emerald-200/70 shadow-[0_10px_24px_-12px_rgba(13,148,136,0.8)]'
+                            : 'bg-slate-100 text-slate-700 ring-slate-200 hover:bg-slate-200'
+                        }`}
+                        aria-pressed={selectedFuelGrade === option.value}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="mb-4 flex w-full max-w-xl justify-center px-2">
               <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 rounded-full border border-white/70 bg-white/90 px-5 py-3 shadow-lg backdrop-blur">
                 {legendItems.map(item => (
                   <div key={item.label} className="flex items-center gap-2">
-                    <Image src={item.icon} alt="" aria-hidden="true" width={20} height={28} className="h-7 w-5" />
+                    <Image
+                      src={item.icon}
+                      alt=""
+                      aria-hidden="true"
+                      width={item.label === 'Gas station' ? 74 : 20}
+                      height={item.label === 'Gas station' ? 56 : 28}
+                      className={item.label === 'Gas station' ? 'h-10 w-[3.75rem]' : 'h-7 w-5'}
+                    />
                     <span className="text-sm font-medium text-slate-700">{item.label}</span>
                   </div>
                 ))}
               </div>
             </div>
+
+            <button
+              type="button"
+              onClick={handleFindGasClick}
+              disabled={latitude === null || longitude === null || isGasStationsLoading}
+              className="mb-4 w-full max-w-sm rounded-full bg-secondary px-6 py-3 text-center text-sm font-semibold text-secondary-foreground shadow-[0_12px_30px_-12px_rgba(37,99,235,0.8)] ring-1 ring-blue-200/70 transition-transform duration-300 ease-in-out hover:scale-[1.02] hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60 md:text-base"
+            >
+              {isGasStationsLoading ? 'Finding Gas...' : 'Find Gas'}
+            </button>
 
             {(tripPlan || isTripEstimateLoading) && (
               <div className="mb-4 w-full max-w-xl px-2">
@@ -522,7 +618,7 @@ export default function Home() {
                 </div>
                 <p className="mt-4 text-sm text-slate-600">
                   {hasSearchedGas
-                    ? `Showing ${gasStationsInRadius.length} live gas stations within ${searchRadiusMiles} miles.`
+                    ? `Showing ${gasStationsToDisplay.length} stations with ${formatFuelGradeLabel(selectedFuelGrade).toLowerCase()} prices within ${searchRadiusMiles} miles.`
                     : 'Choose a radius, then find nearby gas stations with live prices.'}
                 </p>
                 {isGasStationsLoading && (
@@ -531,17 +627,13 @@ export default function Home() {
                 {gasStationsErrorMessage && (
                   <p className="mt-2 text-sm text-rose-600">{gasStationsErrorMessage}</p>
                 )}
+                {hasSearchedGas && !isGasStationsLoading && gasStationsInRadius.length > 0 && gasStationsToDisplay.length === 0 && (
+                  <p className="mt-2 text-sm text-slate-500">
+                    No stations in this search area currently expose a {formatFuelGradeLabel(selectedFuelGrade).toLowerCase()} price.
+                  </p>
+                )}
               </div>
             </div>
-
-            <button
-              type="button"
-              onClick={handleFindGasClick}
-              disabled={latitude === null || longitude === null || isGasStationsLoading}
-              className="mt-6 w-full max-w-sm rounded-full bg-secondary px-6 py-3 text-center text-sm font-semibold text-secondary-foreground shadow-[0_12px_30px_-12px_rgba(37,99,235,0.8)] ring-1 ring-blue-200/70 transition-transform duration-300 ease-in-out hover:scale-[1.02] hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60 md:text-base"
-            >
-              {isGasStationsLoading ? 'Finding Gas...' : 'Find Gas'}
-            </button>
 
             {!hasSearchedGas && (
               <div className="mt-4 w-full max-w-md rounded-2xl border border-white/70 bg-white/90 p-5 shadow-lg backdrop-blur animate-fade-in">
@@ -601,9 +693,7 @@ export default function Home() {
                             {station.distanceMiles !== null && (
                               <span>{station.distanceMiles.toFixed(1)} miles away</span>
                             )}
-                            {station.fuelType && (
-                              <span>{formatFuelType(station.fuelType)}</span>
-                            )}
+                            <span>{formatFuelGradeLabel(selectedFuelGrade)}</span>
                             {station.priceUpdatedAt && (
                               <span>Updated {formatUpdatedTime(station.priceUpdatedAt)}</span>
                             )}
@@ -614,7 +704,7 @@ export default function Home() {
                           <span className="text-lg font-bold text-primary">${station.pricePerGallon.toFixed(2)}/gal</span>
                           <button
                             type="button"
-                            onClick={() => handleGasStationClick(station.id)}
+                            onClick={() => handleGasStationListClick(station.id)}
                             className={`rounded-full px-4 py-2 text-sm font-semibold ring-1 ring-black/10 transition-all duration-300 ease-in-out ${activeSelectedGasStationId === station.id ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-12px_rgba(13,148,136,0.8)]' : 'bg-slate-200 text-slate-800 shadow-[0_10px_24px_-16px_rgba(15,23,42,0.35)] hover:bg-slate-300'}`}
                           >
                             {activeSelectedGasStationId === station.id ? 'Selected' : 'Select'}

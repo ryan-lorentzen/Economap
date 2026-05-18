@@ -11,7 +11,7 @@ interface BuildTripPlanArgs {
   shouldGetGas: boolean;
 }
 
-const DIRECT_DISTANCE_WEIGHT = 6;
+const DIRECT_DISTANCE_WEIGHT = 0.1;
 const SIGNIFICANT_DETOUR_BUFFER_MILES = 1.5;
 const SAME_ROUTE_BUFFER_MILES = 0.35;
 

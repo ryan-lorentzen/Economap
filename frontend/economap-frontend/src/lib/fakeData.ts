@@ -142,12 +142,24 @@ export const generateFakeGasStations = (count: number, lat: number, lng: number,
 
   for (let i = 0; i < count; i++) {
     const location = buildStreetCoordinate(lat, lng, radius, i + 101);
+    const regularPrice = parseFloat((Math.random() * 1.5 + 3.5).toFixed(2));
+    const midgradePrice = parseFloat((regularPrice + 0.3).toFixed(2));
+    const premiumPrice = parseFloat((regularPrice + 0.6).toFixed(2));
+    const dieselPrice = parseFloat((regularPrice + 0.4).toFixed(2));
+
     stations.push({
       id: `gas-${i}`,
       name: `${gasNames[i % gasNames.length]} ${i + 1}`,
       address: location.address,
       coordinates: location.coordinate,
-      pricePerGallon: parseFloat((Math.random() * 1.5 + 3.5).toFixed(2)), // $3.50 to $5.00
+      fuelType: 'REGULAR_UNLEADED',
+      fuelPrices: {
+        regular: { fuelType: 'REGULAR_UNLEADED', pricePerGallon: regularPrice },
+        midgrade: { fuelType: 'MIDGRADE', pricePerGallon: midgradePrice },
+        premium: { fuelType: 'PREMIUM', pricePerGallon: premiumPrice },
+        diesel: { fuelType: 'DIESEL', pricePerGallon: dieselPrice },
+      },
+      pricePerGallon: regularPrice,
     });
   }
 
