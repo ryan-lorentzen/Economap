@@ -74,18 +74,6 @@ const buildGasCacheKey = (latitude: number, longitude: number) =>
 const formatFuelGradeLabel = (fuelGrade: FuelGrade) =>
   FUEL_GRADE_OPTIONS.find((option) => option.value === fuelGrade)?.label ?? fuelGrade;
 
-const formatFuelType = (fuelType?: string) => {
-  if (!fuelType) {
-    return null;
-  }
-
-  return fuelType
-    .toLowerCase()
-    .split('_')
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(' ');
-};
-
 const formatUpdatedTime = (timestamp?: string) => {
   if (!timestamp) {
     return null;

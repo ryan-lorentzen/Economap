@@ -14,7 +14,6 @@ applications:
             - printf 'GOOGLE_PLACES_API_KEY=%s\n' "$GOOGLE_PLACES_API_KEY" > .env.production
         build:
           commands:
-            - cd frontend/economap-frontend
             - npm run build
       artifacts:
         baseDirectory: frontend/economap-frontend/.next

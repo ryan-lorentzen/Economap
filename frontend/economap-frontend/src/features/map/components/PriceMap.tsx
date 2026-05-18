@@ -149,6 +149,8 @@ const GasPriceClusterLayer = ({ gasStations, onGasStationClick, selectedGasStati
   });
 
   const visibleStations = useMemo(() => {
+    void viewTick;
+
     if (gasStations.length === 0) {
       return [];
     }
