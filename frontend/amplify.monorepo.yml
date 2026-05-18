@@ -1,0 +1,25 @@
+version: 1
+applications:
+  - appRoot: frontend/economap-frontend
+    env:
+      variables:
+        AMPLIFY_MONOREPO_APP_ROOT: frontend/economap-frontend
+    frontend:
+      buildPath: /
+      phases:
+        preBuild:
+          commands:
+            - cd frontend/economap-frontend
+            - npm ci
+            - printf 'GOOGLE_PLACES_API_KEY=%s\n' "$GOOGLE_PLACES_API_KEY" > .env.production
+        build:
+          commands:
+            - cd frontend/economap-frontend
+            - npm run build
+      artifacts:
+        baseDirectory: frontend/economap-frontend/.next
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - frontend/economap-frontend/node_modules/**/*
