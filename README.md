@@ -25,3 +25,9 @@ npm run build
 ```
 
 Leaflet maps and browser geolocation are client-only. Route estimates use OSRM with a straight-line fallback when routing is unavailable.
+
+## Deployment
+
+Deploy on Vercel as a Next.js project. Use the repository root as the Vercel Root Directory, `npm ci` as the install command, and `npm run build` as the build command.
+
+Add `GOOGLE_PLACES_API_KEY` in Vercel Project Settings > Environment Variables for Production, Preview, and Development. Keep the key server-side; browser code only calls this application's API routes.

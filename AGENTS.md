@@ -60,7 +60,8 @@ The development server runs at `http://localhost:3000` by default.
 - The API route handlers validate latitude, longitude, and radius before calling Google Places.
 - Google Places responses are normalized into the shared `GasStation` and `Store` types.
 - Live requests use `cache: 'no-store'`; preserve this behavior unless caching is deliberately designed with freshness requirements.
-- Production deployment is configured in `amplify.yml`, which builds this app with `npm ci` and `npm run build`.
+- Deploy to Vercel as a Next.js project from this repository root. Vercel uses `npm ci` and `npm run build`; no `vercel.json` is required for the current configuration.
+- Configure `GOOGLE_PLACES_API_KEY` in Vercel for Production, Preview, and Development rather than generating environment files during the build.
 
 Do not commit `.env*` files or API keys. The frontend `.gitignore` excludes them.
 
