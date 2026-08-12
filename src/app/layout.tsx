@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "EconoMap",
+  title: "Go Go Gas!",
   description: "Find nearby gas stations with live prices and optimized routing.",
 };
 

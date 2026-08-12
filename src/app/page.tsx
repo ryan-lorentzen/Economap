@@ -444,8 +444,8 @@ export default function Home() {
     <main className="relative flex min-h-screen flex-col items-center justify-start overflow-hidden bg-background px-4 py-6 font-sans text-foreground md:px-8 md:py-10">
       <div className="relative z-10 flex w-full flex-col items-center">
         <h1 className="mb-6 flex items-center justify-center gap-3 text-center text-3xl font-semibold tracking-tight text-white md:mb-8 md:text-5xl">
-          <Image src="/AppIcon.png" alt="Economap icon" width={48} height={48} className="h-11 w-11 rounded-xl md:h-12 md:w-12" />
-          <span className="brand-title">EconoMap Gas Finder</span>
+          <Image src="/AppIcon.png" alt="Go Go Gas! icon" width={80} height={80} className="h-16 w-16 rounded-xl md:h-20 md:w-20" />
+          <span className="brand-title">Go Go Gas!</span>
         </h1>
 
         <div className="flex w-full max-w-6xl flex-col gap-6 md:flex-row md:gap-8">
