@@ -42,7 +42,7 @@ const legendItems = [
 
 interface GasStationWithDistance extends GasStation {
   distanceMiles: number | null;
-  economapScore: number | null;
+  gasScore: number | null;
 }
 
 type GasSortMode = 'best' | 'price' | 'distance';
@@ -174,7 +174,7 @@ export default function Home() {
       return {
         ...station,
         distanceMiles,
-        economapScore: distanceMiles === null
+        gasScore: distanceMiles === null
           ? null
           : distanceMiles * DIRECT_DISTANCE_WEIGHT + station.pricePerGallon,
       };
@@ -183,8 +183,8 @@ export default function Home() {
 
   const gasStationsToDisplay = useMemo(() => {
     const comparableStations = gasStationsWithDistance.filter(
-      (station): station is GasStationWithDistance & { distanceMiles: number; economapScore: number } =>
-        station.distanceMiles !== null && station.economapScore !== null
+      (station): station is GasStationWithDistance & { distanceMiles: number; gasScore: number } =>
+        station.distanceMiles !== null && station.gasScore !== null
     );
 
     if (comparableStations.length === 0) {
@@ -212,8 +212,8 @@ export default function Home() {
     }
 
     return [...comparableStations].sort((a, b) => {
-      if (a.economapScore !== b.economapScore) {
-        return a.economapScore - b.economapScore;
+      if (a.gasScore !== b.gasScore) {
+        return a.gasScore - b.gasScore;
       }
 
       return a.pricePerGallon - b.pricePerGallon;
@@ -237,10 +237,7 @@ export default function Home() {
   const tripPlan = useMemo(
     () => buildTripPlan({
       userLocation,
-      selectedStore: null,
       gasStations: selectedGasStation ? [selectedGasStation] : [],
-      hasSelectedGroceries: false,
-      shouldGetGas: selectedGasStation !== null,
     }),
     [selectedGasStation, userLocation]
   );
@@ -452,8 +449,6 @@ export default function Home() {
           <div className="flex w-full flex-col items-center">
             <div id="price-map" className="relative z-10 h-[420px] w-full overflow-hidden rounded-2xl border border-white/70 bg-white/80 shadow-[0_20px_60px_-20px_rgba(15,23,42,0.35)] backdrop-blur md:h-[560px]">
               <PriceMap
-                stores={[]}
-                onStoreClick={() => undefined}
                 onGasStationClick={handleGasStationMapClick}
                 selectedGasStationId={activeSelectedGasStationId}
                 waypoints={dynamicWaypoints}
@@ -648,7 +643,7 @@ export default function Home() {
 
                 <div className="mt-4 flex flex-wrap gap-2">
                   {[
-                    { label: 'Economap Best Choice', value: 'best' as const },
+                    { label: 'Best Choice', value: 'best' as const },
                     { label: 'Lowest Price', value: 'price' as const },
                     { label: 'Lowest Distance', value: 'distance' as const },
                   ].map((option) => (

@@ -1,6 +1,6 @@
-# EconoMap
+# Go Go Gas!
 
-EconoMap finds nearby gas stations with live fuel-grade prices, price and distance ranking, and route estimates.
+Go Go Gas! finds nearby gas stations with live fuel-grade prices, price and distance ranking, and route estimates.
 
 ## Development
 

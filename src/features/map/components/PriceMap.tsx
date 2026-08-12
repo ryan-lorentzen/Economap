@@ -1,18 +1,16 @@
 'use client';
 
-import { Store, GasStation } from '@/types';
+import { GasStation } from '@/types';
 import { useLocationStore } from '@/store/useLocationStore';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-routing-machine/dist/leaflet-routing-machine.css';
-import L from 'leaflet'; // Import Leaflet for custom icon
+import L from 'leaflet';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import RoutingMachine from "./routing-machine";
 import userLocationIcon from './user-location-marker';
 
 interface PriceMapProps {
-  stores: Store[];
-  onStoreClick: (id: string) => void;
   onGasStationClick?: (id: string) => void;
   selectedGasStationId?: string | null;
   waypoints?: { lat: number; lng: number }[];
@@ -281,7 +279,7 @@ const formatUpdatedTime = (timestamp?: string) => {
   }).format(parsedDate);
 };
 
-export const PriceMap = ({ stores, onStoreClick, onGasStationClick, selectedGasStationId, waypoints, gasStations, locationErrorMessage }: PriceMapProps) => {
+export const PriceMap = ({ onGasStationClick, selectedGasStationId, waypoints, gasStations, locationErrorMessage }: PriceMapProps) => {
   const { latitude, longitude } = useLocationStore();
 
 
@@ -326,41 +324,6 @@ export const PriceMap = ({ stores, onStoreClick, onGasStationClick, selectedGasS
             <Popup>You are here</Popup>
           </Marker>
         )}
-        {stores.map((store) => (
-          <Marker 
-            key={store.id} 
-            position={[store.coordinates.lat, store.coordinates.lng]} 
-            eventHandlers={{
-              click: () => {
-                onStoreClick(store.id);
-              },
-            }}
-          >
-            <Popup>
-              <div className="font-sans text-foreground">
-                <h3 className="text-lg font-semibold">{store.name}</h3>
-                <p>{store.address}</p>
-                <button 
-                  onClick={() => onStoreClick(store.id)}
-                  className="mt-3 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow-[0_10px_24px_-12px_rgba(13,148,136,0.85)] ring-1 ring-emerald-200/70 transition-colors duration-200 hover:bg-emerald-700"
-                >
-                  View Details
-                </button>
-                {store.googleMapsUri && (
-                  <a
-                    href={store.googleMapsUri}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-3 inline-flex rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-800 ring-1 ring-slate-200 transition-colors duration-200 hover:bg-slate-200"
-                  >
-                    Open in Google Maps
-                  </a>
-                )}
-              </div>
-            </Popup>
-          </Marker>
-        ))}
-
         {gasStations && gasStations.length > 0 && (
           <GasPriceClusterLayer
             gasStations={gasStations}
