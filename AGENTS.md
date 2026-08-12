@@ -2,9 +2,9 @@
 
 ## Scope
 
-This directory contains the active application. Work primarily in `economap-frontend/`; treat directories above `frontend/` as separate legacy or future project areas unless the task explicitly includes them.
+This directory is the repository and application root. The legacy parent project has been removed; do not reintroduce its scraper, Flask, Prisma, or grocery-comparison infrastructure without an explicit product decision.
 
-Read `economap-frontend/AGENTS.md` before changing the Next.js application. Its instructions are more specific for files under `economap-frontend/`.
+This application uses Next.js 15 and React 19. Check the relevant local Next.js documentation in `node_modules/next/dist/docs/` before using unfamiliar framework APIs, and heed deprecation notices.
 
 ## Application Purpose
 
@@ -20,7 +20,7 @@ Grocery price comparison and shopping-cart code is present but is not part of th
 
 ## Project Layout
 
-All paths below are relative to `economap-frontend/`:
+All paths below are relative to the repository root:
 
 - `src/app/`: Next.js App Router pages, layout, global styles, and API route handlers.
 - `src/app/page.tsx`: active gas-finder page and primary client-side orchestration.
@@ -39,7 +39,7 @@ Use the `@/*` alias for imports from `src/*`, as configured in `tsconfig.json`.
 
 ## Development
 
-Run commands from `frontend/economap-frontend/`:
+Run commands from the repository root:
 
 ```bash
 npm install
@@ -51,7 +51,7 @@ npm run start
 
 The development server runs at `http://localhost:3000` by default.
 
-`npm run lint` uses the repository's ESLint configuration. There is currently no frontend unit-test script in `economap-frontend/package.json`; validate behavior with lint, build, and manual browser checks unless tests are added.
+`npm run lint` uses the repository's ESLint configuration. There is currently no unit-test script; validate behavior with lint, build, and manual browser checks unless tests are added.
 
 ## Environment and Integrations
 
@@ -60,7 +60,7 @@ The development server runs at `http://localhost:3000` by default.
 - The API route handlers validate latitude, longitude, and radius before calling Google Places.
 - Google Places responses are normalized into the shared `GasStation` and `Store` types.
 - Live requests use `cache: 'no-store'`; preserve this behavior unless caching is deliberately designed with freshness requirements.
-- Production deployment is configured in `../amplify.monorepo.yml`, which builds this app with `npm ci` and `npm run build`.
+- Production deployment is configured in `amplify.yml`, which builds this app with `npm ci` and `npm run build`.
 
 Do not commit `.env*` files or API keys. The frontend `.gitignore` excludes them.
 
