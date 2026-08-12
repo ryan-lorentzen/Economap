@@ -443,14 +443,14 @@ export default function Home() {
   return (
     <main className="relative flex min-h-screen flex-col items-center justify-start overflow-hidden bg-background px-4 py-6 font-sans text-foreground md:px-8 md:py-10">
       <div className="relative z-10 flex w-full flex-col items-center">
-        <h1 className="mb-6 flex items-center justify-center gap-3 text-center text-3xl font-semibold tracking-tight text-primary md:mb-8 md:text-5xl">
+        <h1 className="mb-6 flex items-center justify-center gap-3 text-center text-3xl font-semibold tracking-tight text-white md:mb-8 md:text-5xl">
           <Image src="/AppIcon.png" alt="Economap icon" width={48} height={48} className="h-11 w-11 rounded-xl md:h-12 md:w-12" />
           <span className="brand-title">EconoMap Gas Finder</span>
         </h1>
 
         <div className="flex w-full max-w-6xl flex-col gap-6 md:flex-row md:gap-8">
           <div className="flex w-full flex-col items-center">
-            <div id="price-map" className="mb-6 h-[420px] w-full overflow-hidden rounded-2xl border border-white/70 bg-white/80 shadow-[0_20px_60px_-20px_rgba(15,23,42,0.35)] backdrop-blur md:mb-8 md:h-[560px]">
+            <div id="price-map" className="relative z-10 h-[420px] w-full overflow-hidden rounded-2xl border border-white/70 bg-white/80 shadow-[0_20px_60px_-20px_rgba(15,23,42,0.35)] backdrop-blur md:h-[560px]">
               <PriceMap
                 stores={[]}
                 onStoreClick={() => undefined}
@@ -462,30 +462,28 @@ export default function Home() {
               />
             </div>
 
-            <div className="-mt-10 mb-6 w-full px-2 md:-mt-12">
-              <div className="relative z-20 w-full rounded-[0_0_1.5rem_1.5rem] border border-white/80 bg-white/95 px-4 py-4 shadow-[0_18px_36px_-24px_rgba(15,23,42,0.55)] backdrop-blur md:px-5">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Fuel Grade</h2>
-                    <p className="mt-1 text-sm text-slate-600">Switch prices and recommendations without reloading the area search.</p>
-                  </div>
-                  <div className="grid w-full grid-cols-2 gap-2 md:w-auto md:grid-cols-4">
-                    {FUEL_GRADE_OPTIONS.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => setSelectedFuelGrade(option.value)}
-                        className={`rounded-full px-4 py-2.5 text-sm font-semibold ring-1 transition-colors duration-200 ${
-                          selectedFuelGrade === option.value
-                            ? 'bg-primary text-primary-foreground ring-emerald-200/70 shadow-[0_10px_24px_-12px_rgba(13,148,136,0.8)]'
-                            : 'bg-slate-100 text-slate-700 ring-slate-200 hover:bg-slate-200'
-                        }`}
-                        aria-pressed={selectedFuelGrade === option.value}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
+            <div className="relative z-0 -mt-10 mb-6 w-full rounded-[0_0_1.5rem_1.5rem] border border-white/80 bg-white/95 px-4 pb-4 pt-14 shadow-[0_18px_36px_-24px_rgba(15,23,42,0.55)] backdrop-blur md:px-5 md:pt-16">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Fuel Grade</h2>
+                  <p className="mt-1 text-sm text-slate-600">Switch prices and recommendations without reloading the area search.</p>
+                </div>
+                <div className="grid w-full grid-cols-2 gap-2 md:w-auto md:grid-cols-4">
+                  {FUEL_GRADE_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setSelectedFuelGrade(option.value)}
+                      className={`rounded-full px-4 py-2.5 text-sm font-semibold ring-1 transition-colors duration-200 ${
+                        selectedFuelGrade === option.value
+                          ? 'bg-primary text-primary-foreground ring-emerald-200/70 shadow-[0_10px_24px_-12px_rgba(13,148,136,0.8)]'
+                          : 'bg-slate-100 text-slate-700 ring-slate-200 hover:bg-slate-200'
+                      }`}
+                      aria-pressed={selectedFuelGrade === option.value}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
@@ -512,7 +510,7 @@ export default function Home() {
               type="button"
               onClick={handleFindGasClick}
               disabled={latitude === null || longitude === null || isGasStationsLoading}
-              className="mb-4 w-full max-w-sm rounded-full bg-secondary px-6 py-3 text-center text-sm font-semibold text-secondary-foreground shadow-[0_12px_30px_-12px_rgba(37,99,235,0.8)] ring-1 ring-blue-200/70 transition-transform duration-300 ease-in-out hover:scale-[1.02] hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60 md:text-base"
+              className="mb-4 w-full max-w-sm rounded-full bg-blue-600 px-6 py-3 text-center text-sm font-semibold text-white shadow-[0_12px_30px_-12px_rgba(37,99,235,0.8)] ring-1 ring-blue-200/70 transition-transform duration-300 ease-in-out hover:scale-[1.02] hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 md:text-base"
             >
               {isGasStationsLoading ? 'Finding Gas...' : 'Find Gas'}
             </button>
