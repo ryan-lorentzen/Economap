@@ -27,6 +27,27 @@ const GAS_LABEL_ICON_ANCHOR_Y = 50;
 const GAS_LABEL_OVERLAP_INSET_X = 6;
 const GAS_LABEL_OVERLAP_INSET_Y = 4;
 
+const getWebMapUrl = (station: GasStation) =>
+  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${station.coordinates.lat},${station.coordinates.lng}`)}`;
+
+const getPreferredMapUrl = (station: GasStation) => {
+  const { lat, lng } = station.coordinates;
+  const destination = `${lat},${lng}`;
+  const label = encodeURIComponent(station.name);
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+  if (isIOS) {
+    return `https://maps.apple.com/?ll=${destination}&q=${label}`;
+  }
+
+  if (/Android/i.test(navigator.userAgent)) {
+    return `geo:0,0?q=${encodeURIComponent(`${destination}(${station.name})`)}`;
+  }
+
+  return getWebMapUrl(station);
+};
+
 interface GasStationClusterMarkerProps {
   gasStations: GasStation[];
   onGasStationClick?: (id: string) => void;
@@ -211,16 +232,18 @@ const GasPriceClusterLayer = ({ gasStations, onGasStationClick, selectedGasStati
               {station.priceUpdatedAt && (
                 <p>Updated: {formatUpdatedTime(station.priceUpdatedAt)}</p>
               )}
-              {station.googleMapsUri && (
-                <a
-                  href={station.googleMapsUri}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-3 inline-flex rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-800 ring-1 ring-slate-200 transition-colors duration-200 hover:bg-slate-200"
-                >
-                  Open in Google Maps
-                </a>
-              )}
+              <a
+                href={getWebMapUrl(station)}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(event) => {
+                  event.preventDefault();
+                  window.open(getPreferredMapUrl(station), '_blank', 'noopener,noreferrer');
+                }}
+                className="mt-3 inline-flex rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-800 ring-1 ring-slate-200 transition-colors duration-200 hover:bg-slate-200"
+              >
+                Open in Maps
+              </a>
             </div>
           </Popup>
         </Marker>
