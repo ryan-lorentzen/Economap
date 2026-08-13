@@ -3,6 +3,7 @@
 import { getLiveGasStations } from '@/GasPrices/client';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
+import { MapPinned, Search } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { buildTripPlan } from '@/features/map/components/routing-engine';
@@ -46,6 +47,7 @@ interface GasStationWithDistance extends GasStation {
 }
 
 type GasSortMode = 'best' | 'price' | 'distance';
+type AppTab = 'home' | 'map';
 
 const FUEL_GRADE_OPTIONS: { value: FuelGrade; label: string }[] = [
   { value: 'regular', label: 'Regular' },
@@ -107,10 +109,109 @@ const formatDuration = (durationSeconds: number) => {
   return `${hours} hr ${minutes} min`;
 };
 
+interface SearchControlsProps {
+  idPrefix: string;
+  selectedFuelGrade: FuelGrade;
+  searchRadiusMiles: number;
+  hasSearchedGas: boolean;
+  gasStationsToDisplayCount: number;
+  gasStationsInRadiusCount: number;
+  isGasStationsLoading: boolean;
+  gasStationsErrorMessage: string | null;
+  onFuelGradeChange: (fuelGrade: FuelGrade) => void;
+  onSearchRadiusChange: (radiusMiles: number) => void;
+}
+
+const SearchControls = ({
+  idPrefix,
+  selectedFuelGrade,
+  searchRadiusMiles,
+  hasSearchedGas,
+  gasStationsToDisplayCount,
+  gasStationsInRadiusCount,
+  isGasStationsLoading,
+  gasStationsErrorMessage,
+  onFuelGradeChange,
+  onSearchRadiusChange,
+}: SearchControlsProps) => (
+  <div className="flex w-full flex-col gap-4">
+    <section className="w-full" aria-labelledby={`${idPrefix}-fuel-grade-heading`}>
+      <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-lg backdrop-blur">
+        <div className="flex flex-col gap-4">
+          <div>
+            <h3 id={`${idPrefix}-fuel-grade-heading`} className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Fuel Grade</h3>
+          </div>
+          <div className="grid w-full grid-cols-2 gap-2 lg:grid-cols-4">
+            {FUEL_GRADE_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => onFuelGradeChange(option.value)}
+                className={`min-w-0 rounded-full px-4 py-3 text-sm font-semibold ring-1 transition-colors duration-200 ${
+                  selectedFuelGrade === option.value
+                    ? 'bg-primary text-primary-foreground ring-emerald-200/70 shadow-[0_10px_24px_-12px_rgba(13,148,136,0.8)]'
+                    : 'bg-slate-100 text-slate-700 ring-slate-200 hover:bg-slate-200'
+                }`}
+                aria-pressed={selectedFuelGrade === option.value}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section className="w-full" aria-labelledby={`${idPrefix}-search-radius-heading`}>
+      <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-lg backdrop-blur">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h3 id={`${idPrefix}-search-radius-heading`} className="text-base font-semibold text-slate-900 md:text-lg">Search Radius</h3>
+          </div>
+          <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
+            {searchRadiusMiles} mi
+          </span>
+        </div>
+        <input
+          type="range"
+          min={MIN_SEARCH_RADIUS_MILES}
+          max={MAX_SEARCH_RADIUS_MILES}
+          step={1}
+          value={searchRadiusMiles}
+          onChange={(event) => onSearchRadiusChange(Number(event.target.value))}
+          className="mt-4 h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-200 accent-primary"
+        />
+        <div className="mt-2 flex justify-between text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+          <span>{MIN_SEARCH_RADIUS_MILES} miles</span>
+          <span>{MAX_SEARCH_RADIUS_MILES} miles</span>
+        </div>
+        <p className="mt-4 text-sm text-slate-600">
+          {hasSearchedGas
+            ? `Showing ${gasStationsToDisplayCount} stations with ${formatFuelGradeLabel(selectedFuelGrade).toLowerCase()} prices within ${searchRadiusMiles} miles.`
+            : 'Choose a radius, then find nearby gas stations with live prices.'}
+        </p>
+        {isGasStationsLoading && (
+          <p className="mt-2 text-sm text-slate-500">Loading live gas station prices...</p>
+        )}
+        {gasStationsErrorMessage && (
+          <p className="mt-2 text-sm text-rose-600">{gasStationsErrorMessage}</p>
+        )}
+        {hasSearchedGas && !isGasStationsLoading && gasStationsInRadiusCount > 0 && gasStationsToDisplayCount === 0 && (
+          <p className="mt-2 text-sm text-slate-500">
+            No stations in this search area currently expose a {formatFuelGradeLabel(selectedFuelGrade).toLowerCase()} price.
+          </p>
+        )}
+      </div>
+    </section>
+  </div>
+);
+
 export default function Home() {
   const { latitude, longitude, setLocation } = useLocationStore();
 
   const [locationErrorMessage, setLocationErrorMessage] = useState<string | null>(null);
+  const [isLocationFetching, setIsLocationFetching] = useState(false);
+  const [activeTab, setActiveTab] = useState<AppTab>('home');
   const [hasSearchedGas, setHasSearchedGas] = useState(false);
   const [selectedGasStationId, setSelectedGasStationId] = useState<string | null>(null);
   const [selectedFuelGrade, setSelectedFuelGrade] = useState<FuelGrade>('regular');
@@ -403,10 +504,13 @@ export default function Home() {
       return;
     }
 
+    setIsLocationFetching(true);
+
     navigator.geolocation.getCurrentPosition(
       position => {
         setLocationErrorMessage(null);
         setLocation(position.coords.latitude, position.coords.longitude);
+        setIsLocationFetching(false);
       },
       error => {
         const fallbackMessage =
@@ -415,6 +519,7 @@ export default function Home() {
             : 'We could not determine your location. Check your browser settings and try again.';
 
         setLocationErrorMessage(fallbackMessage);
+        setIsLocationFetching(false);
       }
     );
   }, [setLocation]);
@@ -430,60 +535,159 @@ export default function Home() {
 
   const handleGasStationListClick = (id: string) => {
     setSelectedGasStationId(id);
-    const mapElement = document.getElementById('price-map');
-
-    if (mapElement) {
-      mapElement.scrollIntoView({ behavior: 'smooth' });
-    }
+    setActiveTab('map');
   };
 
   return (
-    <main className="relative flex min-h-screen flex-col items-center justify-start overflow-hidden bg-background px-4 py-6 font-sans text-foreground md:px-8 md:py-10">
+    <main className="relative flex min-h-screen flex-col items-center justify-start overflow-hidden bg-background px-4 pb-28 pt-6 font-sans text-foreground md:px-8 md:pb-32 md:pt-10">
       <div className="relative z-10 flex w-full flex-col items-center">
         <h1 className="mb-6 flex items-center justify-center gap-3 text-center text-3xl font-semibold tracking-tight text-white md:mb-8 md:text-5xl">
           <Image src="/AppIcon.png" alt="Go Go Gas! icon" width={80} height={80} className="h-16 w-16 rounded-xl md:h-20 md:w-20" />
           <span className="brand-title">Go Go Gas!</span>
         </h1>
 
-        <div className="flex w-full max-w-6xl flex-col gap-6 md:flex-row md:gap-8">
-          <div className="flex w-full flex-col items-center">
-            <div id="price-map" className="relative z-10 h-[420px] w-full overflow-hidden rounded-2xl border border-white/70 bg-white/80 shadow-[0_20px_60px_-20px_rgba(15,23,42,0.35)] backdrop-blur md:h-[560px]">
+        <div className={`w-full ${activeTab === 'map' ? 'max-w-6xl' : 'max-w-2xl'}`}>
+          <section
+            aria-labelledby="find-gas-heading"
+            aria-hidden={activeTab !== 'home'}
+            className={activeTab === 'home' ? 'flex w-full flex-col items-center' : 'hidden'}
+          >
+            <h2 id="find-gas-heading" className="sr-only">Find gas</h2>
+            <div className="mb-4 w-full px-2">
+              <SearchControls
+                idPrefix="home"
+                selectedFuelGrade={selectedFuelGrade}
+                searchRadiusMiles={searchRadiusMiles}
+                hasSearchedGas={hasSearchedGas}
+                gasStationsToDisplayCount={gasStationsToDisplay.length}
+                gasStationsInRadiusCount={gasStationsInRadius.length}
+                isGasStationsLoading={isGasStationsLoading}
+                gasStationsErrorMessage={gasStationsErrorMessage}
+                onFuelGradeChange={setSelectedFuelGrade}
+                onSearchRadiusChange={setSearchRadiusMiles}
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleFindGasClick}
+              disabled={latitude === null || longitude === null || isGasStationsLoading}
+              className="mb-4 w-full max-w-sm rounded-full bg-blue-600 px-6 py-3 text-center text-sm font-semibold text-white shadow-[0_12px_30px_-12px_rgba(37,99,235,0.8)] ring-1 ring-blue-200/70 transition-transform duration-300 ease-in-out hover:scale-[1.02] hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 md:text-base"
+            >
+              {isGasStationsLoading ? 'Finding Gas...' : 'Find Gas'}
+            </button>
+            {isLocationFetching && (
+              <p className="-mt-2 mb-4 text-sm font-medium text-white" role="status">
+                Fetching Location
+                <span className="location-fetching-dots" aria-hidden="true">
+                  <span>.</span><span>.</span><span>.</span>
+                </span>
+              </p>
+            )}
+
+            {hasSearchedGas && gasStationsToDisplay.length > 0 && (
+              <div className="mt-6 w-full rounded-2xl border border-white/70 bg-white/90 p-5 shadow-lg backdrop-blur animate-fade-in">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-xl font-semibold text-slate-900 md:text-2xl">Best Gas Stations</h3>
+                    <p className="text-sm text-slate-500">
+                      {gasStationsToDisplay.length} station{gasStationsToDisplay.length === 1 ? '' : 's'} in your current search radius.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsBestGasExpanded((currentValue) => !currentValue)}
+                    className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-800 ring-1 ring-slate-300 transition-colors duration-200 hover:bg-slate-300"
+                    aria-expanded={isBestGasExpanded}
+                  >
+                    {isBestGasExpanded ? 'Collapse' : 'Expand'}
+                  </button>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {[
+                    { label: 'Best Choice', value: 'best' as const },
+                    { label: 'Lowest Price', value: 'price' as const },
+                    { label: 'Lowest Distance', value: 'distance' as const },
+                  ].map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setGasSortMode(option.value)}
+                      className={`rounded-full px-4 py-2 text-sm font-semibold ring-1 transition-colors duration-200 ${
+                        gasSortMode === option.value
+                          ? 'bg-primary text-primary-foreground ring-emerald-200/70 shadow-[0_10px_24px_-12px_rgba(13,148,136,0.8)]'
+                          : 'bg-slate-100 text-slate-700 ring-slate-200 hover:bg-slate-200'
+                      }`}
+                      aria-pressed={gasSortMode === option.value}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+
+                {isBestGasExpanded && (
+                  <ul className="mt-4 space-y-3">
+                    {gasStationsToDisplay.map(station => (
+                      <li key={station.id} className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <h4 className="truncate text-base font-medium text-slate-900 md:text-lg">{station.name}</h4>
+                          <p className="truncate text-sm text-slate-500">{station.address}</p>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-slate-500">
+                            {station.distanceMiles !== null && <span>{station.distanceMiles.toFixed(1)} miles away</span>}
+                            <span>{formatFuelGradeLabel(selectedFuelGrade)}</span>
+                            {station.priceUpdatedAt && <span>Updated {formatUpdatedTime(station.priceUpdatedAt)}</span>}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 sm:justify-end">
+                          <span className="text-lg font-bold text-primary">${station.pricePerGallon.toFixed(2)}/gal</span>
+                          <button
+                            type="button"
+                            onClick={() => handleGasStationListClick(station.id)}
+                            className={`rounded-full px-4 py-2 text-sm font-semibold ring-1 ring-black/10 transition-all duration-300 ease-in-out ${activeSelectedGasStationId === station.id ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-12px_rgba(13,148,136,0.8)]' : 'bg-slate-200 text-slate-800 shadow-[0_10px_24px_-16px_rgba(15,23,42,0.35)] hover:bg-slate-300'}`}
+                          >
+                            {activeSelectedGasStationId === station.id ? 'View Map' : 'Select'}
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {hasSearchedGas && !isGasStationsLoading && gasStationsToDisplay.length === 0 && !gasStationsErrorMessage && (
+              <div className="mt-6 w-full max-w-md rounded-2xl border border-white/70 bg-white/90 p-5 shadow-lg backdrop-blur animate-fade-in">
+                <p className="text-center text-base text-slate-700 md:text-lg">No gas stations with live prices were found in this radius.</p>
+              </div>
+            )}
+          </section>
+
+          <section
+            aria-labelledby="map-heading"
+            aria-hidden={activeTab !== 'map'}
+            className={activeTab === 'map' ? 'flex w-full flex-col items-center' : 'hidden'}
+          >
+            <h2 id="map-heading" className="sr-only">Map</h2>
+            {selectedGasStation && (
+              <p className="mb-4 w-full px-2 text-center text-lg font-semibold text-white md:text-xl">
+                Route to {selectedGasStation.name}
+              </p>
+            )}
+
+            <div className="relative z-10 h-[calc(100vh-17rem)] min-h-[420px] w-full overflow-hidden rounded-2xl border border-white/70 bg-white/80 shadow-[0_20px_60px_-20px_rgba(15,23,42,0.35)] backdrop-blur md:h-[560px]">
               <PriceMap
                 onGasStationClick={handleGasStationMapClick}
                 selectedGasStationId={activeSelectedGasStationId}
                 waypoints={dynamicWaypoints}
                 gasStations={hasSearchedGas ? gasStationsToDisplay : []}
                 locationErrorMessage={locationErrorMessage}
+                isVisible={activeTab === 'map'}
               />
             </div>
 
-            <div className="relative z-0 -mt-10 mb-6 w-full rounded-[0_0_1.5rem_1.5rem] border border-white/80 bg-white/95 px-4 pb-4 pt-14 shadow-[0_18px_36px_-24px_rgba(15,23,42,0.55)] backdrop-blur md:px-5 md:pt-16">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">Fuel Grade</h2>
-                  <p className="mt-1 text-sm text-slate-600">Switch prices and recommendations without reloading the area search.</p>
-                </div>
-                <div className="grid w-full grid-cols-2 gap-2 md:w-auto md:grid-cols-4">
-                  {FUEL_GRADE_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setSelectedFuelGrade(option.value)}
-                      className={`rounded-full px-4 py-2.5 text-sm font-semibold ring-1 transition-colors duration-200 ${
-                        selectedFuelGrade === option.value
-                          ? 'bg-primary text-primary-foreground ring-emerald-200/70 shadow-[0_10px_24px_-12px_rgba(13,148,136,0.8)]'
-                          : 'bg-slate-100 text-slate-700 ring-slate-200 hover:bg-slate-200'
-                      }`}
-                      aria-pressed={selectedFuelGrade === option.value}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="mb-4 flex w-full max-w-xl justify-center px-2">
+            <div className="my-4 flex w-full justify-center px-2">
               <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 rounded-full border border-white/70 bg-white/90 px-5 py-3 shadow-lg backdrop-blur">
                 {legendItems.map(item => (
                   <div key={item.label} className="flex items-center gap-2">
@@ -501,14 +705,20 @@ export default function Home() {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleFindGasClick}
-              disabled={latitude === null || longitude === null || isGasStationsLoading}
-              className="mb-4 w-full max-w-sm rounded-full bg-blue-600 px-6 py-3 text-center text-sm font-semibold text-white shadow-[0_12px_30px_-12px_rgba(37,99,235,0.8)] ring-1 ring-blue-200/70 transition-transform duration-300 ease-in-out hover:scale-[1.02] hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 md:text-base"
-            >
-              {isGasStationsLoading ? 'Finding Gas...' : 'Find Gas'}
-            </button>
+            <div className="mb-4 w-full max-w-2xl px-2">
+              <SearchControls
+                idPrefix="map"
+                selectedFuelGrade={selectedFuelGrade}
+                searchRadiusMiles={searchRadiusMiles}
+                hasSearchedGas={hasSearchedGas}
+                gasStationsToDisplayCount={gasStationsToDisplay.length}
+                gasStationsInRadiusCount={gasStationsInRadius.length}
+                isGasStationsLoading={isGasStationsLoading}
+                gasStationsErrorMessage={gasStationsErrorMessage}
+                onFuelGradeChange={setSelectedFuelGrade}
+                onSearchRadiusChange={setSearchRadiusMiles}
+              />
+            </div>
 
             {(tripPlan || isTripEstimateLoading) && (
               <div className="mb-4 w-full max-w-xl px-2">
@@ -516,7 +726,6 @@ export default function Home() {
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <h2 className="text-base font-semibold text-slate-900 md:text-lg">Trip Estimates</h2>
-                      <p className="text-sm text-slate-500">Drive time and distance to the selected station, plus the hidden return trip home.</p>
                     </div>
                     {isTripEstimateLoading && (
                       <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-600">
@@ -572,140 +781,32 @@ export default function Home() {
                 </div>
               </div>
             )}
-
-            <div className="mb-4 w-full max-w-xl px-2">
-              <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-lg backdrop-blur">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <h2 className="text-base font-semibold text-slate-900 md:text-lg">Search Radius</h2>
-                    <p className="text-sm text-slate-500">Show gas stations within your selected distance.</p>
-                  </div>
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
-                    {searchRadiusMiles} mi
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={MIN_SEARCH_RADIUS_MILES}
-                  max={MAX_SEARCH_RADIUS_MILES}
-                  step={1}
-                  value={searchRadiusMiles}
-                  onChange={(event) => setSearchRadiusMiles(Number(event.target.value))}
-                  className="mt-4 h-2 w-full cursor-pointer appearance-none rounded-full bg-slate-200 accent-primary"
-                />
-                <div className="mt-2 flex justify-between text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                  <span>{MIN_SEARCH_RADIUS_MILES} miles</span>
-                  <span>{MAX_SEARCH_RADIUS_MILES} miles</span>
-                </div>
-                <p className="mt-4 text-sm text-slate-600">
-                  {hasSearchedGas
-                    ? `Showing ${gasStationsToDisplay.length} stations with ${formatFuelGradeLabel(selectedFuelGrade).toLowerCase()} prices within ${searchRadiusMiles} miles.`
-                    : 'Choose a radius, then find nearby gas stations with live prices.'}
-                </p>
-                {isGasStationsLoading && (
-                  <p className="mt-2 text-sm text-slate-500">Loading live gas station prices...</p>
-                )}
-                {gasStationsErrorMessage && (
-                  <p className="mt-2 text-sm text-rose-600">{gasStationsErrorMessage}</p>
-                )}
-                {hasSearchedGas && !isGasStationsLoading && gasStationsInRadius.length > 0 && gasStationsToDisplay.length === 0 && (
-                  <p className="mt-2 text-sm text-slate-500">
-                    No stations in this search area currently expose a {formatFuelGradeLabel(selectedFuelGrade).toLowerCase()} price.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {!hasSearchedGas && (
-              <div className="mt-4 w-full max-w-md rounded-2xl border border-white/70 bg-white/90 p-5 shadow-lg backdrop-blur animate-fade-in">
-                <p className="text-center text-base text-slate-700 md:text-lg">Use your current location to find gas stations nearby.</p>
-              </div>
-            )}
-
-            {hasSearchedGas && gasStationsToDisplay.length > 0 && (
-              <div className="mt-6 w-full max-w-md rounded-2xl border border-white/70 bg-white/90 p-5 shadow-lg backdrop-blur animate-fade-in">
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <h2 className="text-xl font-semibold text-slate-900 md:text-2xl">Best Gas Stations</h2>
-                    <p className="text-sm text-slate-500">
-                      {gasStationsToDisplay.length} station{gasStationsToDisplay.length === 1 ? '' : 's'} in your current search radius.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsBestGasExpanded((currentValue) => !currentValue)}
-                    className="rounded-full bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-800 ring-1 ring-slate-300 transition-colors duration-200 hover:bg-slate-300"
-                    aria-expanded={isBestGasExpanded}
-                  >
-                    {isBestGasExpanded ? 'Collapse' : 'Expand'}
-                  </button>
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {[
-                    { label: 'Best Choice', value: 'best' as const },
-                    { label: 'Lowest Price', value: 'price' as const },
-                    { label: 'Lowest Distance', value: 'distance' as const },
-                  ].map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setGasSortMode(option.value)}
-                      className={`rounded-full px-4 py-2 text-sm font-semibold ring-1 transition-colors duration-200 ${
-                        gasSortMode === option.value
-                          ? 'bg-primary text-primary-foreground ring-emerald-200/70 shadow-[0_10px_24px_-12px_rgba(13,148,136,0.8)]'
-                          : 'bg-slate-100 text-slate-700 ring-slate-200 hover:bg-slate-200'
-                      }`}
-                      aria-pressed={gasSortMode === option.value}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-
-                {isBestGasExpanded && (
-                  <ul className="mt-4 space-y-3">
-                    {gasStationsToDisplay.map(station => (
-                      <li key={station.id} className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="min-w-0">
-                          <h3 className="truncate text-base font-medium text-slate-900 md:text-lg">{station.name}</h3>
-                          <p className="truncate text-sm text-slate-500">{station.address}</p>
-                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-slate-500">
-                            {station.distanceMiles !== null && (
-                              <span>{station.distanceMiles.toFixed(1)} miles away</span>
-                            )}
-                            <span>{formatFuelGradeLabel(selectedFuelGrade)}</span>
-                            {station.priceUpdatedAt && (
-                              <span>Updated {formatUpdatedTime(station.priceUpdatedAt)}</span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-3 sm:justify-end">
-                          <span className="text-lg font-bold text-primary">${station.pricePerGallon.toFixed(2)}/gal</span>
-                          <button
-                            type="button"
-                            onClick={() => handleGasStationListClick(station.id)}
-                            className={`rounded-full px-4 py-2 text-sm font-semibold ring-1 ring-black/10 transition-all duration-300 ease-in-out ${activeSelectedGasStationId === station.id ? 'bg-primary text-primary-foreground shadow-[0_10px_24px_-12px_rgba(13,148,136,0.8)]' : 'bg-slate-200 text-slate-800 shadow-[0_10px_24px_-16px_rgba(15,23,42,0.35)] hover:bg-slate-300'}`}
-                          >
-                            {activeSelectedGasStationId === station.id ? 'Selected' : 'Select'}
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-
-            {hasSearchedGas && !isGasStationsLoading && gasStationsToDisplay.length === 0 && !gasStationsErrorMessage && (
-              <div className="mt-6 w-full max-w-md rounded-2xl border border-white/70 bg-white/90 p-5 shadow-lg backdrop-blur animate-fade-in">
-                <p className="text-center text-base text-slate-700 md:text-lg">No gas stations with live prices were found in this radius.</p>
-              </div>
-            )}
-          </div>
+          </section>
         </div>
       </div>
+
+      <nav aria-label="Primary navigation" className="fixed inset-x-0 bottom-0 z-30 border-t border-white/70 bg-white/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_30px_-20px_rgba(15,23,42,0.35)] backdrop-blur">
+        <div className="mx-auto grid w-full max-w-md grid-cols-2 gap-3">
+          <button
+            type="button"
+            onClick={() => setActiveTab('home')}
+            aria-current={activeTab === 'home' ? 'page' : undefined}
+            className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${activeTab === 'home' ? 'bg-primary text-primary-foreground' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+          >
+            <Search aria-hidden="true" size={19} />
+            Find Gas
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('map')}
+            aria-current={activeTab === 'map' ? 'page' : undefined}
+            className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${activeTab === 'map' ? 'bg-primary text-primary-foreground' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+          >
+            <MapPinned aria-hidden="true" size={19} />
+            Map
+          </button>
+        </div>
+      </nav>
     </main>
   );
 }

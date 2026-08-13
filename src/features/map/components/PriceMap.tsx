@@ -16,6 +16,7 @@ interface PriceMapProps {
   waypoints?: { lat: number; lng: number }[];
   gasStations?: GasStation[];
   locationErrorMessage?: string | null;
+  isVisible?: boolean;
 }
 
 const GAS_LABEL_ICON_WIDTH = 60;
@@ -250,6 +251,22 @@ const GasPriceClusterLayer = ({ gasStations, onGasStationClick, selectedGasStati
   );
 };
 
+const MapSizeUpdater = ({ isVisible }: { isVisible: boolean }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!isVisible) {
+      return;
+    }
+
+    const animationFrame = window.requestAnimationFrame(() => map.invalidateSize());
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [isVisible, map]);
+
+  return null;
+};
+
 const formatFuelType = (fuelType?: string) => {
   if (!fuelType) {
     return null;
@@ -279,7 +296,7 @@ const formatUpdatedTime = (timestamp?: string) => {
   }).format(parsedDate);
 };
 
-export const PriceMap = ({ onGasStationClick, selectedGasStationId, waypoints, gasStations, locationErrorMessage }: PriceMapProps) => {
+export const PriceMap = ({ onGasStationClick, selectedGasStationId, waypoints, gasStations, locationErrorMessage, isVisible = true }: PriceMapProps) => {
   const { latitude, longitude } = useLocationStore();
 
 
@@ -315,6 +332,7 @@ export const PriceMap = ({ onGasStationClick, selectedGasStationId, waypoints, g
   return (
     <div className="relative z-0 h-full w-full overflow-hidden rounded-[inherit] bg-transparent">
       <MapContainer center={mapCenter as [number, number]} zoom={13} scrollWheelZoom={false} className="h-full w-full">
+        <MapSizeUpdater isVisible={isVisible} />
         <TileLayer
           attribution='&copy; <a href="https://www.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

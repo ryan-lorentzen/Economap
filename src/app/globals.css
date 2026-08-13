@@ -290,6 +290,41 @@
   text-shadow: 0 4px 14px rgba(13, 148, 136, 0.14);
 }
 
+.location-fetching-dots {
+  display: inline-flex;
+  width: 1.5em;
+}
+
+.location-fetching-dots span {
+  animation: location-fetching-dot 1.2s infinite;
+  opacity: 0.2;
+}
+
+.location-fetching-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.location-fetching-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes location-fetching-dot {
+  0%, 75%, 100% {
+    opacity: 0.2;
+  }
+
+  25%, 50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .location-fetching-dots span {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 @media (max-width: 768px) {
   .leaflet-container a.leaflet-popup-close-button,
   .leaflet-routing-collapse-btn {
