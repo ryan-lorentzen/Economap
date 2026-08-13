@@ -59,10 +59,11 @@ const FUEL_GRADE_OPTIONS: { value: FuelGrade; label: string }[] = [
 const METERS_PER_MILE = 1_609.34;
 const MIN_SEARCH_RADIUS_MILES = 2;
 const MAX_SEARCH_RADIUS_MILES = 15;
-const DEFAULT_SEARCH_RADIUS_MILES = 7;
+const DEFAULT_SEARCH_RADIUS_MILES = 4;
 const SECONDS_PER_MINUTE = 60;
 const GAS_CACHE_LOCATION_PRECISION = 3;
 const DIRECT_DISTANCE_WEIGHT = 0.1;
+const LOCATION_FETCH_TIMEOUT_MS = 15_000;
 
 interface CachedGasStationsEntry {
   fetchedRadiusMeters: number;
@@ -501,18 +502,29 @@ export default function Home() {
 
   useEffect(() => {
     if (!navigator.geolocation) {
+      setLocationErrorMessage('Location services are unavailable in this browser.');
+      setIsLocationFetching(false);
       return;
     }
 
+    let isActive = true;
     setIsLocationFetching(true);
 
     navigator.geolocation.getCurrentPosition(
       position => {
+        if (!isActive) {
+          return;
+        }
+
         setLocationErrorMessage(null);
         setLocation(position.coords.latitude, position.coords.longitude);
         setIsLocationFetching(false);
       },
       error => {
+        if (!isActive) {
+          return;
+        }
+
         const fallbackMessage =
           error.code === error.PERMISSION_DENIED
             ? 'Location access was denied. Enable it in your browser to search nearby gas stations.'
@@ -520,8 +532,17 @@ export default function Home() {
 
         setLocationErrorMessage(fallbackMessage);
         setIsLocationFetching(false);
+      },
+      {
+        enableHighAccuracy: false,
+        timeout: LOCATION_FETCH_TIMEOUT_MS,
+        maximumAge: 60_000,
       }
     );
+
+    return () => {
+      isActive = false;
+    };
   }, [setLocation]);
 
   const handleFindGasClick = () => {
@@ -684,6 +705,7 @@ export default function Home() {
                 gasStations={hasSearchedGas ? gasStationsToDisplay : []}
                 locationErrorMessage={locationErrorMessage}
                 isVisible={activeTab === 'map'}
+                initialSearchRadiusMiles={DEFAULT_SEARCH_RADIUS_MILES}
               />
             </div>
 
@@ -791,7 +813,7 @@ export default function Home() {
             type="button"
             onClick={() => setActiveTab('home')}
             aria-current={activeTab === 'home' ? 'page' : undefined}
-            className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${activeTab === 'home' ? 'bg-primary text-primary-foreground' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+            className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${activeTab === 'home' ? 'bg-blue-100 text-blue-800' : 'bg-white text-slate-700 hover:bg-slate-100'}`}
           >
             <Search aria-hidden="true" size={19} />
             Find Gas
@@ -800,7 +822,7 @@ export default function Home() {
             type="button"
             onClick={() => setActiveTab('map')}
             aria-current={activeTab === 'map' ? 'page' : undefined}
-            className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${activeTab === 'map' ? 'bg-primary text-primary-foreground' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+            className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${activeTab === 'map' ? 'bg-blue-100 text-blue-800' : 'bg-white text-slate-700 hover:bg-slate-100'}`}
           >
             <MapPinned aria-hidden="true" size={19} />
             Map
