@@ -9,8 +9,6 @@ export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 const FUEL_GRADES: FuelGrade[] = ['regular', 'midgrade', 'premium', 'diesel'];
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const recentRequests = new Map<string, number>();
 
 const isDestination = (value: unknown): value is GeocodedDestination => {
   if (!value || typeof value !== 'object') {
@@ -43,15 +41,6 @@ const isPlanRequest = (value: unknown): value is CommutePlanRequest => {
 
 export async function POST(request: NextRequest) {
   try {
-    const clientId = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local';
-    const lastRequestAt = recentRequests.get(clientId) ?? 0;
-    if (Date.now() - lastRequestAt < RATE_LIMIT_WINDOW_MS) {
-      return NextResponse.json(
-        { error: 'Please wait a minute before planning another route.' },
-        { status: 429 }
-      );
-    }
-
     const body = await request.json() as unknown;
     if (!isPlanRequest(body)) {
       return NextResponse.json(
@@ -60,7 +49,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    recentRequests.set(clientId, Date.now());
     const plan = await buildCommutePlan(body, request.signal);
     return NextResponse.json({ plan });
   } catch (error) {

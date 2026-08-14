@@ -26,6 +26,10 @@ const CANDIDATE_SEARCH_RADIUS_METERS = 5 * METERS_PER_MILE;
 const MAX_ROUTE_OFFSET_METERS = METERS_PER_MILE;
 const MAX_ADDED_DETOUR_METERS = METERS_PER_MILE;
 const MAX_TABLE_CANDIDATES = 24;
+// Treat each projected future stop as a modest price penalty. This keeps the
+// itinerary practical without discarding a meaningfully cheaper nearby station.
+const FUTURE_STOP_PRICE_PENALTY = 0.1;
+const ADDED_DETOUR_PRICE_PENALTY_PER_MILE = 0.05;
 // Six broad checks establish the viable corridor; four local checks then compare
 // more stations around the sampled region with the lowest fuel price.
 const SPARSE_SEARCH_FRACTIONS = [0.55, 0.64, 0.73, 0.82, 0.91, 0.99];
@@ -51,6 +55,14 @@ interface VerifiedStation extends ProjectedStation {
   addedDetourMeters: number;
   remainingStopCount: number;
 }
+
+const getPlanningScore = (
+  pricePerGallon: number,
+  remainingStopCount: number,
+  addedDetourMeters = 0
+) => pricePerGallon
+  + remainingStopCount * FUTURE_STOP_PRICE_PENALTY
+  + (addedDetourMeters / METERS_PER_MILE) * ADDED_DETOUR_PRICE_PENALTY_PER_MILE;
 
 const toRadians = (degrees: number) => degrees * Math.PI / 180;
 
@@ -233,8 +245,10 @@ const verifyAndChooseStation = async (
       const rightRemainingStops = Math.max(0, Math.ceil(
         (baselineRoute.distanceMeters - right.routeProgressMeters) / fullTankSafeRangeMeters
       ) - 1);
-      return leftRemainingStops - rightRemainingStops
+      return getPlanningScore(left.fuelPrice.pricePerGallon, leftRemainingStops)
+        - getPlanningScore(right.fuelPrice.pricePerGallon, rightRemainingStops)
         || left.fuelPrice.pricePerGallon - right.fuelPrice.pricePerGallon
+        || leftRemainingStops - rightRemainingStops
         || right.routeProgressMeters - left.routeProgressMeters;
     })
     .slice(0, MAX_TABLE_CANDIDATES);
@@ -270,8 +284,17 @@ const verifyAndChooseStation = async (
   });
 
   return verifiedCandidates.sort((left, right) =>
-    left.remainingStopCount - right.remainingStopCount
+    getPlanningScore(
+      left.fuelPrice.pricePerGallon,
+      left.remainingStopCount,
+      left.addedDetourMeters
+    ) - getPlanningScore(
+      right.fuelPrice.pricePerGallon,
+      right.remainingStopCount,
+      right.addedDetourMeters
+    )
     || left.fuelPrice.pricePerGallon - right.fuelPrice.pricePerGallon
+    || left.remainingStopCount - right.remainingStopCount
     || left.addedDetourMeters - right.addedDetourMeters
     || right.routeProgressMeters - left.routeProgressMeters
   )[0] ?? null;
