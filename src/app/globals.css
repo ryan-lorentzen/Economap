@@ -290,6 +290,34 @@
   text-shadow: 0 4px 14px rgba(13, 148, 136, 0.14);
 }
 
+.commute-stop-marker {
+  background: transparent;
+  border: 0;
+}
+
+.commute-stop-marker__pin {
+  display: flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid white;
+  border-radius: 9999px;
+  background: #f97316;
+  color: white;
+  box-shadow: 0 10px 24px -10px rgba(15, 23, 42, 0.8);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.commute-stop-marker__pin--current {
+  box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.28), 0 10px 24px -10px rgba(15, 23, 42, 0.8);
+}
+
+.commute-stop-marker__pin--destination {
+  background: #2563eb;
+}
+
 .location-fetching-dots {
   display: inline-flex;
   width: 1.5em;

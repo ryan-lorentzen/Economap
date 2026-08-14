@@ -3,11 +3,14 @@
 import { getLiveGasStations } from '@/GasPrices/client';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
-import { MapPinned, Search } from 'lucide-react';
+import { MapPinned, Route, Search } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { CommutePanel } from '@/features/commute/components/CommutePanel';
 import { buildTripPlan } from '@/features/map/components/routing-engine';
+import { COMMUTE_ARRIVAL_RADIUS_METERS, getNextCommuteStop } from '@/lib/commute';
 import { getRouteMetrics, haversineDistance } from '@/lib/routingUtils';
+import { useCommuteStore } from '@/store/useCommuteStore';
 import { useLocationStore } from '@/store/useLocationStore';
 import { FuelGrade, FuelPriceOption, GasStation, RouteLegEstimate, TripEstimateSummary } from '@/types';
 
@@ -47,7 +50,7 @@ interface GasStationWithDistance extends GasStation {
 }
 
 type GasSortMode = 'best' | 'price' | 'distance';
-type AppTab = 'home' | 'map';
+type AppTab = 'home' | 'map' | 'commute';
 
 const FUEL_GRADE_OPTIONS: { value: FuelGrade; label: string }[] = [
   { value: 'regular', label: 'Regular' },
@@ -208,7 +211,8 @@ const SearchControls = ({
 );
 
 export default function Home() {
-  const { latitude, longitude, setLocation } = useLocationStore();
+  const { latitude, longitude, accuracyMeters, setLocation } = useLocationStore();
+  const { plan: commutePlan, hasHydrated: hasCommuteHydrated, markCurrentStopReached, completePlan } = useCommuteStore();
 
   const [locationErrorMessage, setLocationErrorMessage] = useState<string | null>(null);
   const [isLocationFetching, setIsLocationFetching] = useState(false);
@@ -224,6 +228,7 @@ export default function Home() {
   const [gasStationsInRadius, setGasStationsInRadius] = useState<GasStation[]>([]);
   const [gasStationsErrorMessage, setGasStationsErrorMessage] = useState<string | null>(null);
   const [isGasStationsLoading, setIsGasStationsLoading] = useState(false);
+  const [localGasSearchOrigin, setLocalGasSearchOrigin] = useState<{ lat: number; lng: number } | null>(null);
   const gasStationsCacheRef = useRef<Map<string, CachedGasStationsEntry>>(new Map());
 
   const searchRadiusMeters = useMemo(
@@ -234,6 +239,9 @@ export default function Home() {
     () => (latitude !== null && longitude !== null ? { lat: latitude, lng: longitude } : null),
     [latitude, longitude]
   );
+  const isLocalGasContext = activeTab === 'home'
+    || (activeTab === 'map' && (!commutePlan || selectedGasStationId !== null));
+  const localGasLocation = commutePlan && localGasSearchOrigin ? localGasSearchOrigin : userLocation;
 
   const gasStationsForSelectedFuel = useMemo(() => {
     return gasStationsInRadius.flatMap((station) => {
@@ -264,10 +272,10 @@ export default function Home() {
 
   const gasStationsWithDistance: GasStationWithDistance[] = useMemo(() => {
     return gasStationsForSelectedFuel.map((station) => {
-      const distanceMiles = userLocation
+      const distanceMiles = localGasLocation
         ? haversineDistance(
-            userLocation.lat,
-            userLocation.lng,
+            localGasLocation.lat,
+            localGasLocation.lng,
             station.coordinates.lat,
             station.coordinates.lng
           ) / METERS_PER_MILE
@@ -281,7 +289,7 @@ export default function Home() {
           : distanceMiles * DIRECT_DISTANCE_WEIGHT + station.pricePerGallon,
       };
     });
-  }, [gasStationsForSelectedFuel, userLocation]);
+  }, [gasStationsForSelectedFuel, localGasLocation]);
 
   const gasStationsToDisplay = useMemo(() => {
     const comparableStations = gasStationsWithDistance.filter(
@@ -338,10 +346,10 @@ export default function Home() {
 
   const tripPlan = useMemo(
     () => buildTripPlan({
-      userLocation,
+      userLocation: localGasLocation,
       gasStations: selectedGasStation ? [selectedGasStation] : [],
     }),
-    [selectedGasStation, userLocation]
+    [localGasLocation, selectedGasStation]
   );
 
   const dynamicWaypoints = useMemo(
@@ -356,23 +364,30 @@ export default function Home() {
   );
 
   useEffect(() => {
-    if (!hasSearchedGas || latitude === null || longitude === null) {
+    const searchLatitude = localGasLocation?.lat ?? null;
+    const searchLongitude = localGasLocation?.lng ?? null;
+    if (!hasSearchedGas || searchLatitude === null || searchLongitude === null) {
       setGasStationsInRadius([]);
       setGasStationsErrorMessage(null);
       setIsGasStationsLoading(false);
       return;
     }
 
+    if (!isLocalGasContext) {
+      setIsGasStationsLoading(false);
+      return;
+    }
+
     let isActive = true;
     const abortController = new AbortController();
-    const gasCacheKey = buildGasCacheKey(latitude, longitude);
+    const gasCacheKey = buildGasCacheKey(searchLatitude, searchLongitude);
     const cachedGasStations = gasStationsCacheRef.current.get(gasCacheKey);
 
     if (cachedGasStations) {
       const locallyFilteredStations = cachedGasStations.stations.filter((station) => {
         const distanceFromUserMeters = haversineDistance(
-          latitude,
-          longitude,
+          searchLatitude,
+          searchLongitude,
           station.coordinates.lat,
           station.coordinates.lng
         );
@@ -395,8 +410,8 @@ export default function Home() {
 
       try {
         const stations = await getLiveGasStations({
-          latitude,
-          longitude,
+          latitude: searchLatitude,
+          longitude: searchLongitude,
           radiusMeters: searchRadiusMeters,
           signal: abortController.signal,
         });
@@ -431,7 +446,7 @@ export default function Home() {
       isActive = false;
       abortController.abort();
     };
-  }, [hasSearchedGas, latitude, longitude, searchRadiusMeters]);
+  }, [hasSearchedGas, isLocalGasContext, localGasLocation, searchRadiusMeters]);
 
   useEffect(() => {
     if (!tripPlan || tripPlan.orderedStops.length < 2) {
@@ -517,7 +532,7 @@ export default function Home() {
         }
 
         setLocationErrorMessage(null);
-        setLocation(position.coords.latitude, position.coords.longitude);
+        setLocation(position.coords.latitude, position.coords.longitude, position.coords.accuracy);
         setIsLocationFetching(false);
       },
       error => {
@@ -545,7 +560,72 @@ export default function Home() {
     };
   }, [setLocation]);
 
+  useEffect(() => {
+    if (!hasCommuteHydrated || !commutePlan || commutePlan.status === 'completed' || !navigator.geolocation) {
+      return;
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        setLocation(position.coords.latitude, position.coords.longitude, position.coords.accuracy);
+        setLocationErrorMessage(null);
+      },
+      (error) => {
+        if (error.code === error.PERMISSION_DENIED) {
+          setLocationErrorMessage('Location access was denied. Enable it to track progress on your commute.');
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: LOCATION_FETCH_TIMEOUT_MS,
+        maximumAge: 30_000,
+      }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [commutePlan, hasCommuteHydrated, setLocation]);
+
+  useEffect(() => {
+    if (
+      !commutePlan
+      || commutePlan.status !== 'active'
+      || latitude === null
+      || longitude === null
+    ) {
+      return;
+    }
+
+    const nextStop = getNextCommuteStop(commutePlan);
+    if (!nextStop) {
+      return;
+    }
+
+    const distanceToNextStop = haversineDistance(
+      latitude,
+      longitude,
+      nextStop.coordinates.lat,
+      nextStop.coordinates.lng
+    );
+    const arrivalThresholdMeters = Math.max(
+      50,
+      COMMUTE_ARRIVAL_RADIUS_METERS - Math.min(accuracyMeters ?? 0, COMMUTE_ARRIVAL_RADIUS_METERS - 50)
+    );
+    if (distanceToNextStop > arrivalThresholdMeters) {
+      return;
+    }
+
+    if (nextStop.type === 'destination') {
+      completePlan();
+    } else {
+      markCurrentStopReached();
+      setActiveTab('commute');
+    }
+  }, [accuracyMeters, commutePlan, completePlan, latitude, longitude, markCurrentStopReached]);
+
   const handleFindGasClick = () => {
+    if (latitude !== null && longitude !== null) {
+      setLocalGasSearchOrigin({ lat: latitude, lng: longitude });
+    }
     setSelectedGasStationId(null);
     setHasSearchedGas(true);
   };
@@ -558,6 +638,17 @@ export default function Home() {
     setSelectedGasStationId(id);
     setActiveTab('map');
   };
+
+  const handleMapTabClick = () => {
+    if (commutePlan && commutePlan.status !== 'completed') {
+      setSelectedGasStationId(null);
+    }
+    setActiveTab('map');
+  };
+
+  const commuteMapPlan = commutePlan && commutePlan.status !== 'completed' && !selectedGasStation
+    ? commutePlan
+    : null;
 
   return (
     <main className="relative flex min-h-screen flex-col items-center justify-start overflow-hidden bg-background px-4 pb-28 pt-6 font-sans text-foreground md:px-8 md:pb-32 md:pt-10">
@@ -573,7 +664,7 @@ export default function Home() {
             aria-hidden={activeTab !== 'home'}
             className={activeTab === 'home' ? 'flex w-full flex-col items-center' : 'hidden'}
           >
-            <h2 id="find-gas-heading" className="sr-only">Find gas</h2>
+            <h2 id="find-gas-heading" className="sr-only">Local gas</h2>
             <div className="mb-4 w-full px-2">
               <SearchControls
                 idPrefix="home"
@@ -595,7 +686,7 @@ export default function Home() {
               disabled={latitude === null || longitude === null || isGasStationsLoading}
               className="mb-4 w-full max-w-sm rounded-full bg-blue-600 px-6 py-3 text-center text-sm font-semibold text-white shadow-[0_12px_30px_-12px_rgba(37,99,235,0.8)] ring-1 ring-blue-200/70 transition-transform duration-300 ease-in-out hover:scale-[1.02] hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 md:text-base"
             >
-              {isGasStationsLoading ? 'Finding Gas...' : 'Find Gas'}
+              {isGasStationsLoading ? 'Finding Gas...' : 'Find Local Gas'}
             </button>
             {isLocationFetching && (
               <p className="-mt-2 mb-4 text-sm font-medium text-white" role="status">
@@ -686,15 +777,46 @@ export default function Home() {
           </section>
 
           <section
+            aria-labelledby="commute-heading"
+            aria-hidden={activeTab !== 'commute'}
+            className={activeTab === 'commute' ? 'flex w-full flex-col items-center' : 'hidden'}
+          >
+            <h2 id="commute-heading" className="sr-only">Commute route planner</h2>
+            <CommutePanel
+              origin={userLocation}
+              locationErrorMessage={locationErrorMessage}
+              onPlanReady={() => {
+                setSelectedGasStationId(null);
+                setActiveTab('commute');
+              }}
+              onViewMap={handleMapTabClick}
+            />
+          </section>
+
+          <section
             aria-labelledby="map-heading"
             aria-hidden={activeTab !== 'map'}
             className={activeTab === 'map' ? 'flex w-full flex-col items-center' : 'hidden'}
           >
             <h2 id="map-heading" className="sr-only">Map</h2>
-            {selectedGasStation && (
+            {commuteMapPlan ? (
+              <p className="mb-4 w-full px-2 text-center text-lg font-semibold text-white md:text-xl">
+                Saved route to {commuteMapPlan.destination.name}
+              </p>
+            ) : selectedGasStation ? (
               <p className="mb-4 w-full px-2 text-center text-lg font-semibold text-white md:text-xl">
                 Route to {selectedGasStation.name}
               </p>
+            ) : null}
+
+            {commutePlan && selectedGasStation && (
+              <button
+                type="button"
+                onClick={() => setSelectedGasStationId(null)}
+                className="mb-4 rounded-full bg-white px-4 py-2 text-sm font-semibold text-blue-700 shadow-lg ring-1 ring-blue-200 hover:bg-blue-50"
+              >
+                Return to Commute Route
+              </button>
             )}
 
             <div className="relative z-10 h-[calc(100vh-17rem)] min-h-[420px] w-full overflow-hidden rounded-2xl border border-white/70 bg-white/80 shadow-[0_20px_60px_-20px_rgba(15,23,42,0.35)] backdrop-blur md:h-[560px]">
@@ -702,10 +824,11 @@ export default function Home() {
                 onGasStationClick={handleGasStationMapClick}
                 selectedGasStationId={activeSelectedGasStationId}
                 waypoints={dynamicWaypoints}
-                gasStations={hasSearchedGas ? gasStationsToDisplay : []}
+                gasStations={!commuteMapPlan && hasSearchedGas ? gasStationsToDisplay : []}
                 locationErrorMessage={locationErrorMessage}
                 isVisible={activeTab === 'map'}
                 initialSearchRadiusMiles={DEFAULT_SEARCH_RADIUS_MILES}
+                commutePlan={commuteMapPlan}
               />
             </div>
 
@@ -726,8 +849,13 @@ export default function Home() {
                 ))}
               </div>
             </div>
+            {commuteMapPlan && (
+              <p className="mb-4 text-center text-xs font-medium text-white/80">
+                Gas price and station data provided by Google Places.
+              </p>
+            )}
 
-            <div className="mb-4 w-full max-w-2xl px-2">
+            {!commuteMapPlan && <div className="mb-4 w-full max-w-2xl px-2">
               <SearchControls
                 idPrefix="map"
                 selectedFuelGrade={selectedFuelGrade}
@@ -740,9 +868,9 @@ export default function Home() {
                 onFuelGradeChange={setSelectedFuelGrade}
                 onSearchRadiusChange={setSearchRadiusMiles}
               />
-            </div>
+            </div>}
 
-            {(tripPlan || isTripEstimateLoading) && (
+            {!commuteMapPlan && (tripPlan || isTripEstimateLoading) && (
               <div className="mb-4 w-full max-w-xl px-2">
                 <div className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-lg backdrop-blur">
                   <div className="flex items-center justify-between gap-4">
@@ -808,24 +936,33 @@ export default function Home() {
       </div>
 
       <nav aria-label="Primary navigation" className="fixed inset-x-0 bottom-0 z-30 border-t border-white/70 bg-white/95 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_30px_-20px_rgba(15,23,42,0.35)] backdrop-blur">
-        <div className="mx-auto grid w-full max-w-md grid-cols-2 gap-3">
+        <div className="mx-auto grid w-full max-w-xl grid-cols-3 gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={handleMapTabClick}
+            aria-current={activeTab === 'map' ? 'page' : undefined}
+            className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-2 py-3 text-sm font-semibold sm:px-4 ${activeTab === 'map' ? 'bg-blue-100 text-blue-800' : 'bg-white text-slate-700 hover:bg-slate-100'}`}
+          >
+            <MapPinned aria-hidden="true" size={19} />
+            Map
+          </button>
           <button
             type="button"
             onClick={() => setActiveTab('home')}
             aria-current={activeTab === 'home' ? 'page' : undefined}
-            className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${activeTab === 'home' ? 'bg-blue-100 text-blue-800' : 'bg-white text-slate-700 hover:bg-slate-100'}`}
+            className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-2 py-3 text-sm font-semibold sm:px-4 ${activeTab === 'home' ? 'bg-blue-100 text-blue-800' : 'bg-white text-slate-700 hover:bg-slate-100'}`}
           >
             <Search aria-hidden="true" size={19} />
-            Find Gas
+            Local Gas
           </button>
           <button
             type="button"
-            onClick={() => setActiveTab('map')}
-            aria-current={activeTab === 'map' ? 'page' : undefined}
-            className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold ${activeTab === 'map' ? 'bg-blue-100 text-blue-800' : 'bg-white text-slate-700 hover:bg-slate-100'}`}
+            onClick={() => setActiveTab('commute')}
+            aria-current={activeTab === 'commute' ? 'page' : undefined}
+            className={`flex min-h-12 items-center justify-center gap-2 rounded-xl px-2 py-3 text-sm font-semibold sm:px-4 ${activeTab === 'commute' ? 'bg-blue-100 text-blue-800' : 'bg-white text-slate-700 hover:bg-slate-100'}`}
           >
-            <MapPinned aria-hidden="true" size={19} />
-            Map
+            <Route aria-hidden="true" size={19} />
+            Commute
           </button>
         </div>
       </nav>

@@ -66,3 +66,59 @@ export interface RouteSummary {
   totalDistance: number;
   totalTime: number;
 }
+
+export interface GeocodedDestination {
+  id: string;
+  name: string;
+  address: string;
+  coordinates: RouteWaypoint;
+}
+
+export interface CommuteStop {
+  id: string;
+  name: string;
+  address: string;
+  type: 'gas' | 'destination';
+  coordinates: RouteWaypoint;
+  pricePerGallon?: number;
+  priceUpdatedAt?: string;
+  fuelType?: string;
+  googleMapsUri?: string;
+}
+
+export interface CommuteRouteLeg {
+  fromStopId: string;
+  toStopId: string;
+  distanceMeters: number;
+  durationSeconds: number;
+}
+
+export type CommutePlanStatus = 'active' | 'awaiting_range' | 'completed';
+
+export interface CommutePlan {
+  version: 1;
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  fuelGrade: FuelGrade;
+  initialRangeMiles: number;
+  fullTankRangeMiles: number;
+  currentRangeMiles: number;
+  origin: RouteStop;
+  destination: GeocodedDestination;
+  stops: CommuteStop[];
+  legs: CommuteRouteLeg[];
+  routeGeometry: RouteWaypoint[];
+  totalDistanceMeters: number;
+  totalDurationSeconds: number;
+  currentStopIndex: number;
+  status: CommutePlanStatus;
+}
+
+export interface CommutePlanRequest {
+  origin: RouteWaypoint;
+  destination: GeocodedDestination;
+  currentRangeMiles: number;
+  fullTankRangeMiles: number;
+  fuelGrade: FuelGrade;
+}

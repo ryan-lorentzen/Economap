@@ -1,14 +1,15 @@
 'use client';
 
-import { GasStation } from '@/types';
+import { CommutePlan, CommuteStop, GasStation } from '@/types';
 import { useLocationStore } from '@/store/useLocationStore';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-routing-machine/dist/leaflet-routing-machine.css';
 import L from 'leaflet';
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, Marker, Polyline, Popup, TileLayer, useMap, useMapEvents } from 'react-leaflet';
 import RoutingMachine from "./routing-machine";
 import userLocationIcon from './user-location-marker';
+import { getWebDirectionsUrl, openPreferredDirections } from '@/lib/mapLinks';
 
 interface PriceMapProps {
   onGasStationClick?: (id: string) => void;
@@ -18,6 +19,7 @@ interface PriceMapProps {
   locationErrorMessage?: string | null;
   isVisible?: boolean;
   initialSearchRadiusMiles: number;
+  commutePlan?: CommutePlan | null;
 }
 
 const GAS_LABEL_ICON_WIDTH = 60;
@@ -26,27 +28,6 @@ const GAS_LABEL_ICON_ANCHOR_X = 30;
 const GAS_LABEL_ICON_ANCHOR_Y = 50;
 const GAS_LABEL_OVERLAP_INSET_X = 6;
 const GAS_LABEL_OVERLAP_INSET_Y = 4;
-
-const getWebMapUrl = (station: GasStation) =>
-  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${station.coordinates.lat},${station.coordinates.lng}`)}`;
-
-const getPreferredMapUrl = (station: GasStation) => {
-  const { lat, lng } = station.coordinates;
-  const destination = `${lat},${lng}`;
-  const label = encodeURIComponent(station.name);
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
-    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-
-  if (isIOS) {
-    return `https://maps.apple.com/?ll=${destination}&q=${label}`;
-  }
-
-  if (/Android/i.test(navigator.userAgent)) {
-    return `geo:0,0?q=${encodeURIComponent(`${destination}(${station.name})`)}`;
-  }
-
-  return getWebMapUrl(station);
-};
 
 interface GasStationClusterMarkerProps {
   gasStations: GasStation[];
@@ -80,6 +61,15 @@ const buildPriceIcon = (pricePerGallon: number, hiddenCount: number) =>
     iconSize: [GAS_LABEL_ICON_WIDTH, GAS_LABEL_ICON_HEIGHT],
     iconAnchor: [GAS_LABEL_ICON_ANCHOR_X, GAS_LABEL_ICON_ANCHOR_Y],
     popupAnchor: [0, -42],
+  });
+
+const buildCommuteStopIcon = (stop: CommuteStop, index: number, isCurrent: boolean) =>
+  L.divIcon({
+    className: 'commute-stop-marker',
+    html: `<span class="commute-stop-marker__pin${isCurrent ? ' commute-stop-marker__pin--current' : ''}${stop.type === 'destination' ? ' commute-stop-marker__pin--destination' : ''}">${stop.type === 'destination' ? 'D' : index + 1}</span>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+    popupAnchor: [0, -20],
   });
 
 const getGasLabelBox = (map: L.Map, station: GasStation) => {
@@ -233,12 +223,12 @@ const GasPriceClusterLayer = ({ gasStations, onGasStationClick, selectedGasStati
                 <p>Updated: {formatUpdatedTime(station.priceUpdatedAt)}</p>
               )}
               <a
-                href={getWebMapUrl(station)}
+                href={getWebDirectionsUrl(station)}
                 target="_blank"
                 rel="noreferrer"
                 onClick={(event) => {
                   event.preventDefault();
-                  window.open(getPreferredMapUrl(station), '_blank', 'noopener,noreferrer');
+                  openPreferredDirections(station);
                 }}
                 className="mt-3 inline-flex rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-800 ring-1 ring-slate-200 transition-colors duration-200 hover:bg-slate-200"
               >
@@ -303,6 +293,64 @@ const InitialMapView = ({
   return null;
 };
 
+const CommuteRouteView = ({ plan, isVisible }: { plan: CommutePlan; isVisible: boolean }) => {
+  const map = useMap();
+  const previousPlanIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!isVisible || previousPlanIdRef.current === plan.id || plan.routeGeometry.length < 2) {
+      return;
+    }
+
+    previousPlanIdRef.current = plan.id;
+    const bounds = L.latLngBounds(plan.routeGeometry.map((point) => [point.lat, point.lng]));
+    const animationFrame = window.requestAnimationFrame(() => {
+      map.fitBounds(bounds, { padding: [42, 42], animate: false });
+    });
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [isVisible, map, plan.id, plan.routeGeometry]);
+
+  return (
+    <>
+      <Polyline
+        positions={plan.routeGeometry.map((point) => [point.lat, point.lng])}
+        pathOptions={{ color: '#2563eb', opacity: 0.88, weight: 6 }}
+      />
+      {plan.stops.map((stop, index) => (
+        <Marker
+          key={stop.id}
+          position={[stop.coordinates.lat, stop.coordinates.lng]}
+          icon={buildCommuteStopIcon(stop, index, plan.status !== 'completed' && index === plan.currentStopIndex)}
+        >
+          <Popup>
+            <div className="font-sans text-foreground">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-600">
+                {stop.type === 'gas' ? `Stop ${index + 1}` : 'Destination'}
+              </p>
+              <h3 className="mt-1 text-lg font-semibold">{stop.name}</h3>
+              <p>{stop.address}</p>
+              {stop.pricePerGallon !== undefined && <p className="mt-1 font-semibold text-emerald-700">${stop.pricePerGallon.toFixed(2)}/gal</p>}
+              <a
+                href={getWebDirectionsUrl(stop)}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(event) => {
+                  event.preventDefault();
+                  openPreferredDirections(stop);
+                }}
+                className="mt-3 inline-flex rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                Open in Maps
+              </a>
+            </div>
+          </Popup>
+        </Marker>
+      ))}
+    </>
+  );
+};
+
 const formatFuelType = (fuelType?: string) => {
   if (!fuelType) {
     return null;
@@ -332,7 +380,7 @@ const formatUpdatedTime = (timestamp?: string) => {
   }).format(parsedDate);
 };
 
-export const PriceMap = ({ onGasStationClick, selectedGasStationId, waypoints, gasStations, locationErrorMessage, isVisible = true, initialSearchRadiusMiles }: PriceMapProps) => {
+export const PriceMap = ({ onGasStationClick, selectedGasStationId, waypoints, gasStations, locationErrorMessage, isVisible = true, initialSearchRadiusMiles, commutePlan }: PriceMapProps) => {
   const { latitude, longitude } = useLocationStore();
 
 
@@ -346,7 +394,7 @@ export const PriceMap = ({ onGasStationClick, selectedGasStationId, waypoints, g
     });
   }, []);
 
-  if (latitude === null || longitude === null) {
+  if ((latitude === null || longitude === null) && !commutePlan) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-transparent px-6 text-center">
         <div>
@@ -361,7 +409,9 @@ export const PriceMap = ({ onGasStationClick, selectedGasStationId, waypoints, g
     );
   }
 
-  const mapCenter: [number, number] = [latitude, longitude];
+  const mapCenter: [number, number] = latitude !== null && longitude !== null
+    ? [latitude, longitude]
+    : [commutePlan!.origin.coordinates.lat, commutePlan!.origin.coordinates.lng];
 
 
 
@@ -369,9 +419,9 @@ export const PriceMap = ({ onGasStationClick, selectedGasStationId, waypoints, g
     <div className="relative z-0 h-full w-full overflow-hidden rounded-[inherit] bg-transparent">
       <MapContainer center={mapCenter as [number, number]} zoom={13} scrollWheelZoom={false} className="h-full w-full">
         <MapSizeUpdater isVisible={isVisible} />
-        <InitialMapView center={mapCenter} radiusMiles={initialSearchRadiusMiles} isVisible={isVisible} />
+        {!commutePlan && <InitialMapView center={mapCenter} radiusMiles={initialSearchRadiusMiles} isVisible={isVisible} />}
         <TileLayer
-          attribution='&copy; <a href="https://www.org/copyright">OpenStreetMap</a> contributors'
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         {latitude !== null && longitude !== null && (
@@ -387,7 +437,8 @@ export const PriceMap = ({ onGasStationClick, selectedGasStationId, waypoints, g
           />
         )}
 
-        {waypoints && waypoints.length >= 2 && (
+        {commutePlan && <CommuteRouteView plan={commutePlan} isVisible={isVisible} />}
+        {!commutePlan && waypoints && waypoints.length >= 2 && (
           <RoutingMachine key={waypoints.map(p => `${p.lat}-${p.lng}`).join('_')} waypoints={waypoints.map(p => L.latLng(p.lat, p.lng))} />
         )}
       </MapContainer>

@@ -288,7 +288,8 @@ const buildSearchAreas = (
 
 const fetchGasStationsForArea = async (
   apiKey: string,
-  searchArea: SearchArea
+  searchArea: SearchArea,
+  signal?: AbortSignal
 ): Promise<GasStation[]> => {
   const response = await fetch(GOOGLE_PLACES_NEARBY_URL, {
     method: 'POST',
@@ -312,6 +313,7 @@ const fetchGasStationsForArea = async (
       rankPreference: 'DISTANCE',
     }),
     cache: 'no-store',
+    signal,
   });
 
   if (!response.ok) {
@@ -326,6 +328,25 @@ const fetchGasStationsForArea = async (
   return (payload.places ?? [])
     .map(mapPlaceToGasStation)
     .filter((station): station is GasStation => station !== null);
+};
+
+export const fetchGasStationsInCircle = async ({
+  latitude,
+  longitude,
+  radiusMeters,
+  signal,
+}: LiveGasStationSearchParams & { signal?: AbortSignal }): Promise<GasStation[]> => {
+  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+
+  if (!apiKey) {
+    throw new Error('GOOGLE_PLACES_API_KEY is not configured.');
+  }
+
+  return fetchGasStationsForArea(apiKey, {
+    latitude,
+    longitude,
+    radiusMeters: Math.min(Math.max(radiusMeters, MIN_RADIUS_METERS), MAX_RADIUS_METERS),
+  }, signal);
 };
 
 export const fetchNearbyGasStations = async ({
